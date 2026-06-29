@@ -8,18 +8,21 @@
 /* ── Reset & Root ── */
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 
-/* Cool Graphite + Indigo Accent — updated June 26, 2026 */
+/* Cool Graphite + Indigo Accent — refined June 28, 2026
+   "Dark but inviting": page stays near-black to match the brand,
+   but the card surface is lifted noticeably lighter, and CTAs
+   lean fully into the indigo accent (Notion / Linear / Vercel pattern). */
 :root {
-  /* ── Primary — Cool Graphite ──────────────────────── */
-  --primary:           #18181B;
-  --primary-dark:      #09090B;
-  --primary-hover:     #27272A;
-  --primary-active:    #3F3F46;
-  --primary-subtle:    #F4F4F5;
-  --primary-border:    #D4D4D8;
-  --primary-gradient:  none;
-  --primary-start:     #18181B;
-  --primary-end:       #27272A;
+  /* ── Primary — now the accent itself, for confident CTAs ── */
+  --primary:           #6366F1;
+  --primary-dark:      #4338CA;
+  --primary-hover:     #4F46E5;
+  --primary-active:    #4338CA;
+  --primary-subtle:    rgba(99,102,241,0.15);
+  --primary-border:    rgba(99,102,241,0.3);
+  --primary-gradient:  linear-gradient(135deg, #6366F1, #8B5CF6);
+  --primary-start:     #6366F1;
+  --primary-end:       #8B5CF6;
 
   /* ── Accent — Indigo ─────────────────────────────── */
   --accent:            #6366F1;
@@ -28,21 +31,24 @@
   --accent-subtle:     rgba(99,102,241,0.15);
   --accent-border:     rgba(99,102,241,0.3);
 
-  /* ── Background — Dark Shell ─────────────────────── */
-  --bg-page:           #0F0F11;
-  --bg-card:           #1C1C1F;
-  --bg-surface:        #242428;
-  --bg-hover:          #2A2A2E;
+  /* ── Background — Dark Shell ───────────────────────
+     Page stays near-black graphite (brand-consistent with
+     the landing page), but the card is lifted clearly above
+     it so a form-heavy page doesn't read as one flat void. ── */
+  --bg-page:           #07090F;
+  --bg-card:           #13151F;
+  --bg-surface:        #1B1E2E;
+  --bg-hover:          #232742;
 
-  /* ── Text ────────────────────────────────────────── */
-  --text-primary:      #FAFAFA;
-  --text-secondary:    #A1A1AA;
-  --text-meta:         #71717A;
-  --text-tertiary:     #52525B;
+  /* ── Text — softened off-white, slight indigo tint in grays ── */
+  --text-primary:      #F4F4F6;
+  --text-secondary:    #A8ABC2;
+  --text-meta:         #7D8099;
+  --text-tertiary:     #5B5E75;
 
-  /* ── Borders ─────────────────────────────────────── */
-  --border:            #27272A;
-  --border-light:      #1F1F22;
+  /* ── Borders — indigo-tinted so they read against the lighter card ── */
+  --border:            #242842;
+  --border-light:      #1C1F30;
   --border-focus:      #6366F1;
 
   /* ── Status ─────────────────────────────────────── */
@@ -51,10 +57,12 @@
   --warning:      #f59e0b;
   --info:              #6366F1;
 
+  /* Card shadow carries a faint indigo glow alongside the drop shadow,
+     so the lifted surface feels warm rather than just "dark grey box". */
   --shadow-sm:  0 1px 2px  rgba(0,0,0,0.4);
   --shadow-md:  0 2px 8px  rgba(0,0,0,0.5);
-  --shadow-lg:  0 4px 16px rgba(0,0,0,0.6);
-  --shadow-xl:  0 8px 32px rgba(0,0,0,0.7);
+  --shadow-lg:  0 4px 16px rgba(0,0,0,0.55), 0 0 50px rgba(99,102,241,0.08);
+  --shadow-xl:  0 8px 32px rgba(0,0,0,0.65), 0 0 70px rgba(99,102,241,0.10);
 
   --radius-sm:    8px;
   --radius-md:    14px;
@@ -83,13 +91,13 @@ body {
 .page-bg::before {
   content:''; position:absolute;
   width:700px; height:700px; top:-200px; right:-200px;
-  background: radial-gradient(circle, rgba(99,102,241,0.10) 0%, transparent 65%);
+  background: radial-gradient(circle, rgba(99,102,241,0.13) 0%, transparent 65%);
   border-radius:50%;
 }
 .page-bg::after {
   content:''; position:absolute;
   width:500px; height:500px; bottom:-150px; left:-150px;
-  background: radial-gradient(circle, rgba(99,102,241,0.06) 0%, transparent 65%);
+  background: radial-gradient(circle, rgba(99,102,241,0.08) 0%, transparent 65%);
   border-radius:50%;
 }
 
@@ -321,7 +329,7 @@ body {
 .schedule-grid { display:flex; flex-direction:column; gap:0.6rem; margin-top:0.5rem; }
 .schedule-row {
   display:flex; align-items:center; gap:0.75rem;
-  padding:0.75rem 0.9rem; background:var(--bg-card);
+  padding:0.75rem 0.9rem; background:var(--bg-surface);
   border:1px solid var(--border); border-radius:var(--radius-sm);
 }
 .day-label { min-width:88px; font-weight:700; font-size:0.88rem; color:var(--text-secondary); }
@@ -359,7 +367,7 @@ body {
   align-items:center;           /* vertically centred — no top-clipping */
   gap:1rem;
   padding:1rem 1.2rem;
-  background:var(--bg-card);
+  background:var(--bg-surface);
   border:2px solid var(--border);
   border-radius:var(--radius-md);
   transition:all 0.25s;
@@ -385,13 +393,13 @@ body {
   border-radius:50%;
   object-fit:cover;
   display:block;
-  border:2px solid var(--bg-card); /* gap between image and ring */
+  border:2px solid var(--bg-surface); /* gap between image and ring */
 }
 .online-dot {
   position:absolute; bottom:2px; right:2px;
   width:11px; height:11px;
   background: var(--success);
-  border:2px solid var(--bg-card);
+  border:2px solid var(--bg-surface);
   border-radius:50%;
 }
 

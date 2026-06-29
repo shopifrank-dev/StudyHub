@@ -506,13 +506,13 @@ export function threadListItemTemplate(thread, currentUserId) {
     ? `<img src="${escAttr(thread.avatar)}"
             class="thread-avatar w-12 h-12 rounded-full object-cover flex-shrink-0"
             alt="${esc(thread.title)}" loading="lazy">`
-    : `<div class="thread-avatar-placeholder w-12 h-12 rounded-full bg-indigo-100 text-indigo-700
+    : `<div class="thread-avatar-placeholder w-12 h-12 rounded-full bg-accent-subtle text-accent
                     text-base font-bold flex items-center justify-center flex-shrink-0 select-none">
          ${esc(thread.title.charAt(0).toUpperCase())}
        </div>`;
 
   const unreadPill = unread > 0
-    ? `<span class="thread-unread-badge min-w-[20px] h-5 rounded-full bg-indigo-600 text-white
+    ? `<span class="thread-unread-badge min-w-[20px] h-5 rounded-full bg-accent text-white
                     text-[10px] font-bold flex items-center justify-center px-1.5 leading-none self-end">
          ${unread > 99 ? '99+' : unread}
        </span>`
@@ -523,7 +523,7 @@ export function threadListItemTemplate(thread, currentUserId) {
 
   // Dept badge
   const deptBadge = thread.department
-    ? `<span class="text-[9px] font-semibold text-indigo-500 bg-indigo-50 rounded-full
+    ? `<span class="text-[9px] font-semibold text-accent bg-accent-subtle rounded-full
                     px-1.5 py-0.5 flex-shrink-0 leading-tight">
          ${esc(thread.department)}
        </span>`
@@ -531,13 +531,13 @@ export function threadListItemTemplate(thread, currentUserId) {
 
   // Closed badge
   const closedBadge = !thread.is_open
-    ? `<span class="text-[9px] text-red-500 font-semibold ml-0.5">🔒</span>`
+    ? `<span class="text-[9px] text-red-400 font-semibold ml-0.5">🔒</span>`
     : '';
 
   return `
-    <div class="thread-list-item flex items-center gap-3 px-4 py-3 bg-white
-                 hover:bg-indigo-50/50 active:bg-indigo-50 transition-colors cursor-pointer
-                 border-b border-gray-100"
+    <div class="thread-list-item flex items-center gap-3 px-4 py-3 bg-surface-card
+                 hover:bg-surface-hover active:bg-surface-hover transition-colors cursor-pointer
+                 border-b border-line-light"
          data-action="open-thread"
          data-thread-id="${thread.id}"
          role="button" tabindex="0"
@@ -547,18 +547,18 @@ export function threadListItemTemplate(thread, currentUserId) {
 
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-1.5 mb-0.5 flex-wrap">
-          <span class="text-sm font-semibold text-gray-900 truncate">${esc(thread.title)}</span>
+          <span class="text-sm font-semibold text-ink-primary truncate">${esc(thread.title)}</span>
           ${deptBadge}
           ${closedBadge}
         </div>
         <div class="flex items-center gap-1 min-w-0">
           ${statusIcon}
-          <span class="thread-last-message text-xs text-gray-500 truncate">${esc(previewText)}</span>
+          <span class="thread-last-message text-xs text-ink-secondary truncate">${esc(previewText)}</span>
         </div>
       </div>
 
       <div class="flex flex-col items-end gap-1 flex-shrink-0 self-start pt-0.5">
-        <span class="text-[11px] text-gray-400 whitespace-nowrap">${previewTime}</span>
+        <span class="text-[11px] text-ink-tertiary whitespace-nowrap">${previewTime}</span>
         ${unreadPill}
       </div>
 

@@ -226,7 +226,7 @@
     <a href="#growth" class="nav-link">Growth</a>
   </div>
   <div class="nav-actions">
-    <a data-type="login" href="{{ url_for('student.student_auth.login') }}" class="btn btn-ghost">Log In</a>
+    <a data-type="login" href="/login" class="btn btn-ghost">Log In</a>
     <a data-type="register" href="/google/start" class="btn btn-primary">Get Started Free</a>
   </div>
   <button class="hamburger" id="hamburger" aria-label="Open menu" aria-expanded="false">
@@ -237,7 +237,7 @@
     <a href="#people" class="nav-link">Community</a>
     <a href="#work" class="nav-link">Study tools</a>
     <a href="#growth" class="nav-link">Growth</a>
-    <a data-type="login" href="{{ url_for('student.student_auth.login') }}" class="nav-link">Log In</a>
+    <a data-type="login" href="/login" class="nav-link">Log In</a>
     <a data-type="register" href="/google/start" class="btn btn-primary">Get Started Free</a>
   </div>
 </nav>
@@ -621,7 +621,7 @@
         <div class="works-num">3</div>
         <div class="works-tag">Work + Help</div>
         <h3>Get unstuck</h3>
-        <p>Your assignments stay sorted by what matters most. Share one with your group for real help, or ask Learnora without leaving what you're doing.</p>
+        <p>Your assignments stay sorted by what matters most. Share one with your connections for real help, or ask Learnora without leaving what you're doing.</p>
       </div>
       <div class="works-step reveal reveal-delay-1">
         <div class="works-num">4</div>
@@ -1484,6 +1484,7 @@
     <div class="section-center reveal" style="margin-bottom: 1rem;">
       <div class="eyebrow">Your Campus, By The Numbers</div>
       <h2 class="section-heading">A real, active community</h2>
+      <p class="section-sub" style="margin: 0.5rem auto 0; font-size:0.88rem;">Numbers update as the platform grows — figures shown are live totals.</p>
     </div>
     <div class="stats-strip reveal">
       <div class="stat-cell"><div class="sc-num" data-countup="1240">0</div><div class="sc-lbl">Study groups formed</div></div>
@@ -1545,10 +1546,17 @@
     display: none; position: fixed; bottom: 0; left: 0; right: 0; z-index: 150;
     padding: 0.75rem 5%; background: rgba(7,9,15,0.92); backdrop-filter: blur(16px);
     border-top: 1px solid var(--border); transform: translateY(100%); transition: transform 0.3s ease;
+    display: none; align-items: center; gap: 0.75rem;
   }
   .sticky-cta.visible { transform: translateY(0); }
-  .sticky-cta .btn { width: 100%; justify-content: center; }
-  @media (max-width: 860px) { .sticky-cta { display: block; } body { padding-bottom: 0; } }
+  .sticky-cta .btn { flex: 1; justify-content: center; }
+  .sticky-dismiss {
+    background: none; border: none; color: var(--text-muted); font-size: 1rem;
+    cursor: pointer; padding: 0.5rem; flex-shrink: 0; line-height: 1;
+    transition: color 0.2s;
+  }
+  .sticky-dismiss:hover { color: var(--text); }
+  @media (max-width: 860px) { .sticky-cta { display: flex; } body { padding-bottom: 0; } }
 
   /* ─── ANCHOR OFFSET ─── */
   section[id] { scroll-margin-top: 64px; }
@@ -1689,11 +1697,11 @@
     <div class="footer-col">
       <h4>Account</h4>
       <a data-type="register" href="/google/start">Sign Up Free</a>
-      <a data-type="login" href="{{ url_for('student.student_auth.login') }}">Log In</a>
+      <a data-type="login" href="/login">Log In</a>
     </div>
     <div class="footer-col">
       <h4>Company</h4>
-      <a href="/cdn-cgi/l/email-protection#7a121f1616151c150f141e1f08091b161f093a1d171b131654191517">Contact Us</>
+      <a href="mailto:studyhubnoreply@gmail.com">Contact Us</a>
     </div>
   </div>
 
@@ -1704,12 +1712,11 @@
   </div>
 </footer>
 
+
 <div class="sticky-cta" id="stickyCta">
   <a data-type="register" href="/google/start" class="btn btn-primary">Get Started Free</a>
+  <button class="sticky-dismiss" id="stickyDismiss" aria-label="Dismiss">✕</button>
 </div>
-
-<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script>
-<a href= "mailto:studyhubnoreply@gmail.com">Contact Us</a>
 <script>
   /* ─── STARFIELD (subtle, paused off-screen) ─── */
   (function(){
@@ -1816,11 +1823,18 @@
   (function(){
     const bar = document.getElementById('stickyCta');
     const hero = document.querySelector('.hero');
+    const dismissBtn = document.getElementById('stickyDismiss');
     if(!bar || !hero) return;
     const obs = new IntersectionObserver(entries => {
       entries.forEach(e => bar.classList.toggle('visible', !e.isIntersecting));
     }, { threshold: 0 });
     obs.observe(hero);
+    if(dismissBtn) {
+      dismissBtn.addEventListener('click', () => {
+        bar.classList.remove('visible');
+        obs.disconnect();
+      });
+    }
   })();
 </script>
 </body>

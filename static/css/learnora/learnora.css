@@ -1,46 +1,53 @@
-/* Cool Graphite + Indigo Accent — updated 2026-06-26 */
+/* Graphite + Indigo Accent — "dark but inviting" pass — updated 2026-06-28 */
 :root {
-  --primary:           #18181B;
-  --primary-dark:      #09090B;
-  --primary-hover:     #27272A;
-  --primary-active:    #3F3F46;
+  /* Page sits at the same near-black as the landing page for brand continuity,
+     but every surface that sits ON the page (cards, header, sidebar, input)
+     is lifted noticeably lighter so content doesn't read as a void.
+     Indigo gets used more liberally — borders, glows, highlights — to keep
+     things feeling warm rather than just "dark". */
+
+  --primary:           #20243A;
+  --primary-dark:      #14172A;
+  --primary-hover:     #2A2F4A;
+  --primary-active:    #363C5C;
   --primary-subtle:    #F4F4F5;
-  --primary-border:    #D4D4D8;
-  --primary-gradient:  none;
-  --primary-start:     #18181B;
-  --primary-end:       #27272A;
+  --primary-border:    #3A3F5C;
+  --primary-gradient:  linear-gradient(135deg, #6366F1, #4338CA);
+  --primary-start:     #6366F1;
+  --primary-end:       #4338CA;
 
-  --accent:            #6366F1;
-  --accent-hover:      #4F46E5;
-  --accent-active:     #4338CA;
-  --accent-subtle:     rgba(99,102,241,0.15);
-  --accent-border:     rgba(99,102,241,0.3);
+  --accent:            #818CF8;
+  --accent-hover:      #6366F1;
+  --accent-active:     #4F46E5;
+  --accent-subtle:     rgba(129,140,248,0.16);
+  --accent-border:     rgba(129,140,248,0.38);
+  --accent-glow:       rgba(99,102,241,0.45);
 
-  --bg-page:           #0F0F11;
-  --bg-card:           #1C1C1F;
-  --bg-surface:        #242428;
-  --bg-hover:          #2A2A2E;
+  --bg-page:           #07090F;
+  --bg-card:           #13151F;
+  --bg-surface:        #1A1D2B;
+  --bg-hover:          #21253A;
   --bg-primary:        var(--bg-card);
   --bg-secondary:      var(--bg-page);
   --bg-tertiary:       var(--bg-surface);
 
-  --text-primary:      #FAFAFA;
-  --text-secondary:    #A1A1AA;
-  --text-meta:         #71717A;
-  --text-tertiary:     #52525B;
+  --text-primary:      #F5F5F7;
+  --text-secondary:    #A8AEC4;
+  --text-meta:         #7C82A0;
+  --text-tertiary:     #5E6480;
 
-  --border:            #27272A;
-  --border-light:      #1F1F22;
+  --border:            #262B40;
+  --border-light:      #1D2032;
 
   --success:           #10B981;
   --warning:           #F59E0B;
   --danger:            #EF4444;
-  --info:              #6366F1;
+  --info:              #818CF8;
 
-  --shadow-sm:  0 1px 2px  rgba(0,0,0,0.4);
-  --shadow-md:  0 2px 8px  rgba(0,0,0,0.5);
-  --shadow-lg:  0 4px 16px rgba(0,0,0,0.6);
-  --shadow-xl:  0 8px 32px rgba(0,0,0,0.7);
+  --shadow-sm:  0 1px 2px  rgba(0,0,0,0.35);
+  --shadow-md:  0 2px 10px rgba(5,6,12,0.5);
+  --shadow-lg:  0 6px 22px rgba(5,6,12,0.55);
+  --shadow-xl:  0 10px 36px rgba(5,6,12,0.6);
 }
 
 
@@ -75,6 +82,7 @@ html, body {
   min-width: 260px;
   background: var(--bg-card);
   border-right: 1px solid var(--border);
+  box-shadow: inset -1px 0 0 rgba(129,140,248,0.04);
   display: flex;
   flex-direction: column;
   transition: width 0.25s ease, min-width 0.25s ease, opacity 0.25s ease;
@@ -247,7 +255,7 @@ html, body {
   align-items: center;
   gap: 10px;
   padding: 12px 16px;
-  background: rgba(28, 28, 31, 0.95);
+  background: rgba(19, 21, 31, 0.92);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--border);
@@ -588,6 +596,7 @@ html, body {
 .lr-input-area {
   background: var(--bg-card);
   border-top: 1px solid var(--border);
+  box-shadow: inset 0 1px 0 rgba(129,140,248,0.05);
   padding: 10px 16px 10px;
   flex-shrink: 0;
 }
