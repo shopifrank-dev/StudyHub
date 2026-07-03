@@ -2,6 +2,7 @@
 # ============================================================================
 # IMPORTANT: Load environment variables FIRST before any other imports
 # ============================================================================
+from dotenv import load_dotenv
 
 from flask import Flask, render_template, request, jsonify
 from flask_migrate import Migrate
@@ -9,7 +10,6 @@ from services.websocket_messages import init_message_websocket
 from services.websocket_threads import thread_ws_manager
 from extensions import db, mail
 import os
-import set_env
 from routes.student.helpers import (
     token_required, success_response, error_response
 )
@@ -19,6 +19,8 @@ import logging
 from routes.student import student_bp
 from routes.student.auth import google_bp
 from logging.handlers import RotatingFileHandler
+load_dotenv()
+
 
 os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
@@ -26,7 +28,6 @@ os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 # ============================================================================
 # Configuration Class
 # ============================================================================
-
 migrate = Migrate()
 
 
@@ -43,7 +44,7 @@ class Config:
     TESTING = False
     
     # Database
-    DATABASE_URL = os.environ.get('DATABASE_URL')
+    DATABASE_URL = os.environ.get('DATABASE_NEW_URL')
     if not DATABASE_URL:
         raise ValueError("DATABASE_URL environment variable is not set!")
     
@@ -139,7 +140,7 @@ def create_app(config_class=Config):
     # Logging Configuration
     # ========================================================================
     if not app.debug and not app.testing:
-        # Create logs directory if it doesn't exist
+        # Create logs directory if itesn't exist
         if not os.path.exists('logs'):
             os.mkdir('logs')
         
@@ -360,7 +361,7 @@ if __name__ == "__main__":
     print("🚀 StudyHub Starting...")
     print("="*60)
     print(f"📧 Email:            {os.environ.get('MAIL_USERNAME', 'Not configured')}")
-    print(f"🗄️  Database:         {os.environ.get('DATABASE_URL', 'Not configured')}")
+    print(f"🗄️  Database:         {os.environ.get('DATABASE_NEW_URL', 'Not configured')}")
     print(f"🔑 Secret Key:       {'✅ Set' if os.environ.get('SECRET_KEY') else '❌ Missing'}")
     print(f"🌐 WebSocket:        threading + simple-websocket (Python 3.13 compatible)")
     print(f"💬 Thread WebSocket: {'✅ Initialized' if thread_ws_manager.socketio else '❌ Not initialized'}")

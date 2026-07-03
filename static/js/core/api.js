@@ -528,35 +528,60 @@ function showToast(message, type = "info", duration = 6000) {
   if (!container) {
     container = document.createElement("div");
     container.id = "toast-container";
-    container.style.cssText = "position:fixed;top:20px;right:20px;z-index:99999;";
+    container.style.cssText = "position:fixed;top:20px;right:20px;z-index:var(--z-tooltip, 9999);display:flex;flex-direction:column;gap:10px;";
     document.body.appendChild(container);
   }
 
   const toast = document.createElement("div");
   toast.className = `toast toast-${type}`;
-  toast.textContent = message;
-  
-  const colors = {
-    success: "#28a745",
-    error: "#dc3545",
-    warning: "#ffc107",
-    info: "#17a2b8"
-  };
-  
-  toast.style.cssText = `
-    padding:12px 18px;
-    margin-top:10px;
-    border-radius:6px;
-    font-family:sans-serif;
-    font-size:14px;
-    color:#fff;
-    opacity:0.95;
-    background:${colors[type] || colors.info};
-  `;
 
+  // Status colors map to your existing CSS variables; default/info uses accent
+  const accentColors = {
+    success: "var(--success)",
+    error: "var(--danger)",
+    warning: "var(--warning)",
+    info: "var(--accent)"
+  };
+  const stripeColor = accentColors[type] || accentColors.info;
+
+toast.style.cssText = `
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:12px 20px;
+  border-radius:var(--radius-md);
+  font-family:sans-serif;
+  font-size:14px;
+  color:var(--text-primary);
+  background:var(--bg-card);
+  border:1px solid var(--border-light);
+  border-left:3px solid ${stripeColor};
+  box-shadow:var(--shadow-lg);
+  opacity:0;
+  transition:opacity var(--transition-base), transform var(--transition-base);
+  z-index: 9999;
+  max-width: 90%;
+  white-space: nowrap;
+`;
+
+  toast.textContent = message;
   container.appendChild(toast);
-  
-  setTimeout(() => toast.remove(), duration);
+
+  // Fade/slide in
+  requestAnimationFrame(() => {
+    toast.style.opacity = "1";
+    toast.style.transform = "translateX(0)";
+  });
+
+  setTimeout(() => {
+    toast.style.opacity = "0";
+    toast.style.transform = "translateX(8px)";
+    setTimeout(() => toast.remove(), 200);
+  }, duration);
 }
 
 window.addEventListener('unhandledrejection', (event) => {

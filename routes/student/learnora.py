@@ -65,7 +65,6 @@ from werkzeug.utils import secure_filename
 from routes.student.helpers import (
     token_required, success_response, error_response
 )
-import set_env
 from PIL import Image
 
 from flask import request, render_template,  jsonify, Response, stream_with_context, current_app, Blueprint
@@ -1320,7 +1319,12 @@ class StudyAssistant:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
 
-def _call_provider_sync(messages: list, provider: dict) -> str | None:
+def _call_provider_sync(
+    messages: list,
+    provider: dict,
+    type: str = "",
+    max_tokens: int | None = None,
+) -> str | None:
     """
     Non-streaming provider call for use in background threads.
 
@@ -1330,6 +1334,15 @@ def _call_provider_sync(messages: list, provider: dict) -> str | None:
     import requests as req_lib
     import json as _json
 
+    # Some call types need more headroom than a normal chat reply.
+    # Meeting notes summarize a whole conversation into structured JSON,
+    # so they need a much higher ceiling.
+    DEFAULT_MAX_TOKENS = {
+        "meeting_notes": 2000,
+    }
+    if max_tokens is None:
+        max_tokens = DEFAULT_MAX_TOKENS.get(type, 500)
+
     headers = {"Content-Type": "application/json"}
     if provider["api_key"]:
         headers["Authorization"] = f"Bearer {provider['api_key']}"
@@ -1338,7 +1351,7 @@ def _call_provider_sync(messages: list, provider: dict) -> str | None:
         "model":      provider["text_model"],
         "messages":   messages,
         "stream":     False,
-        "max_tokens": 500
+        "max_tokens": max_tokens
     }
 
     try:
@@ -1350,24 +1363,40 @@ def _call_provider_sync(messages: list, provider: dict) -> str | None:
         )
         response.raise_for_status()
         data = response.json()
-        raw = data["choices"][0]["message"]["content"] or ""
+
+        message = data["choices"][0]["message"]
+
+        # Reasoning models (DeepSeek-reasoner, QwQ, etc.) sometimes return
+        # the usable text in "reasoning_content" rather than "content",
+        # or leave "content" empty. Prefer content when it's non-empty,
+        # fall back to reasoning_content otherwise.
+        content = (message.get("content") or "").strip()
+        reasoning_content = (message.get("reasoning_content") or "").strip()
+        raw = content or reasoning_content
+
+        if not raw:
+            logger.warning(
+                f"Learnora sync call ({type or 'default'}): empty content "
+                f"and reasoning_content from provider {provider.get('name')}"
+            )
+            return None
+
         return clean_ai_response(raw)
 
     except req_lib.exceptions.Timeout:
-        logger.error("Learnora sync call: timeout")
+        logger.error(f"Learnora sync call ({type or 'default'}): timeout")
         provider_manager.mark_provider_failed(provider["name"], "timeout")
         return None
 
     except req_lib.exceptions.HTTPError as e:
-        logger.error(f"Learnora sync call HTTP error: {e}")
+        logger.error(f"Learnora sync call ({type or 'default'}) HTTP error: {e}")
         provider_manager.mark_provider_failed(provider["name"], str(e))
         return None
 
     except Exception as e:
-        logger.error(f"Learnora sync call error: {e}", exc_info=True)
+        logger.error(f"Learnora sync call ({type or 'default'}) error: {e}", exc_info=True)
         provider_manager.mark_provider_failed(provider["name"], str(e))
         return None
-
 
 # ===========================================================
 # FLASK ROUTES

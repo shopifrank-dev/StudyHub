@@ -315,7 +315,6 @@ export function handleActivityRefresh() {
  * Initialize activity feed section
  */
 function initActivityFeedSection() {
-  showToast("Activity Functiom called", 'info');
   // Load initial data
   loadActivityFeed();
   

@@ -311,8 +311,10 @@ html { scroll-behavior: smooth; }
 <!-- ==================== END SPLASH SCREEN ==================== -->
 
   <div class="app-container">
-    <!-- ==================== HEADER ==================== -->
-    <header id='header' class="header">
+    <!-- ==================== HEADER BAR ====================
+         The toggle button is now a sibling of <header>, not a child,
+         wrapped together in #header-bar so it keeps the same visual spot. -->
+    <div id="header-bar" class="header-bar">
         <button class="icon-button mobile-menu-btn" id='sidebar-toggle-btn' data-action="toggle-mobile-sidebar">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <line x1="3" y1="12" x2="21" y2="12"></line>
@@ -321,6 +323,7 @@ html { scroll-behavior: smooth; }
             </svg>
         </button>
 
+    <header id='header' class="header">
 <div class="logo">
   <!-- Modern icon mark: neural/spark motif representing AI-assisted learning -->
   <div style="
@@ -366,6 +369,7 @@ html { scroll-behavior: smooth; }
             <span>Create</span>
         </button>
     </header>
+    </div> <!-- /#header-bar -->
 
     <!-- ==================== MAIN LAYOUT ==================== -->
     <div class="main-layout">
@@ -5618,52 +5622,42 @@ function _closeMessagesOverlay() {
 let _messagingInitialized = false;
 
 function _openMessagesOverlay() {
-    showToast("Opening messages overlay");
 
     // ── Guard: overlay element must exist ────────────────────────────
     const overlay = document.getElementById('messages');
     if (!overlay) {
-        showToast("Overlay element not found");
         return;
     }
 
     // ── Hide floating UI elements ────────────────────────────────────
     _bottomNav?.classList.add('hidden');
-    showToast("Bottom nav hidden");
-
+    
     _helpBtn?.classList.add('hidden');
-    showToast("Help button hidden");
-    const header = document.getElementById('header');
-    if (header) header.classList.add('hidden');
+    const headerBar = document.getElementById('header-bar');
+    if (headerBar) headerBar.classList.add('hidden');
 
     // ── Show overlay & lock scroll ───────────────────────────────────
     overlay.classList.remove('hidden');
     document.body.style.overflow = 'hidden';
-    showToast("Overlay visible, scroll locked");
 
     // ── Sync active state on nav items ──────────────────────────────
     document.querySelectorAll('.nav-item, .bottom-nav-item').forEach(item => {
         item.classList.remove('active');
         if (item.dataset.target === 'messages') item.classList.add('active');
     });
-    showToast("Nav items synced");
 
     // ── Update current section ───────────────────────────────────────
     currentSection = 'messages';
     document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-    showToast("Section set to messages");
 
     // ── Close mobile sidebar if open ─────────────────────────────────
     toggleMobileSidebar();
-    showToast("Mobile sidebar toggled");
 
     // ── Initialise messaging once (prevents stacked socket listeners) ─
     if (!_messagingInitialized && typeof initializeMessaging === 'function') {
         _messagingInitialized = true;
         initializeMessaging();
-        showToast("Messaging initialized");
     } else {
-        showToast("Messaging already initialized, skipping");
     }
 }
 
@@ -5680,9 +5674,11 @@ function _closeMessagesOverlay() {
     overlay.classList.add('hidden');
     document.body.style.overflow = '';
     document.getElementById("feed").classList.add("active");
-    _header?.classList.remove('hidden');
+    const headerBar = document.getElementById('header-bar');
+    if (headerBar) headerBar.classList.remove('hidden');
     _bottomNav?.classList.remove('hidden');
     _helpBtn?.classList.remove('hidden');
+    toggleMobileSidebar();
 }
 
 
@@ -5694,22 +5690,47 @@ function toggleMobileSidebar(event) {
     const sidebar = document.getElementById('sections-sidebar');
     const backdrop = document.getElementById('sidebar-backdrop');
     if (!sidebar) return;
-    const isOpen = sidebar.classList.contains('active');
-    if (isOpen) {
-      sidebar.classList.remove('active');
-      if (backdrop) backdrop.classList.remove('active');
+    const headerEl = document.getElementById('header');
+    const headerBarEl = document.getElementById('header-bar');
+
+    // Sidebar is visible by default (no .hidden class). Toggling .hidden
+    // (display:none !important — already defined globally in feed3.css)
+    // works at ANY screen width, unlike .active's transform which only
+    // has a visual effect inside the @media (max-width: 768px) block.
+    const isHidden = sidebar.classList.contains('hidden');
+
+    // Helper to create toast messages
+    const createToast = (label, extra = '') => {
+        return `${label}\n` +
+               `Header: ${headerEl?.className || 'N/A'}\n` +
+               `Header Bar: ${headerBarEl?.className || 'N/A'}\n` +
+               `Sidebar: ${sidebar.className}\n` +
+               `Body Overflow: ${document.body.style.overflow || 'visible'}\n` +
+               `${extra}`;
+    };
+    // Show BEFORE
+
+    // Toggle
+    if (isHidden) {
+        sidebar.classList.remove('hidden');
+        if (backdrop) backdrop.classList.add('active');
     } else {
-      sidebar.classList.add('active');
-      if (backdrop) backdrop.classList.add('active');
+        sidebar.classList.add('hidden');
+        if (backdrop) backdrop.classList.remove('active');
     }
+
+    // Show AFTER
+    // Async checks
+    
 }
 
 function closeMobileSidebar() {
     const sidebar = document.getElementById('sections-sidebar');
     const backdrop = document.getElementById('sidebar-backdrop');
-    if (sidebar) sidebar.classList.remove('active');
+    if (sidebar) sidebar.classList.add('hidden');
     if (backdrop) backdrop.classList.remove('active');
 }
+
 function logout(event) {
     if (event) event.preventDefault();
     if (confirm('Are you sure you want to logout?')) {
@@ -5757,7 +5778,7 @@ document.addEventListener('input', (e) => {
 
 
 
-window.clcloseMobileSidebar = closeMobileSidebar;
+window.closeMobileSidebar = closeMobileSidebar;
 window.toggleMobileSidebar = toggleMobileSidebar;
 window.logout = logout;
 window._openMessagesOverlay = _openMessagesOverlay;

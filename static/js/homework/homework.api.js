@@ -5,12 +5,24 @@
  * ============================================================================
  */
 
+/**
+ * Strip null/undefined/empty values from a params object before building
+ * a query string — otherwise things like `cursor: null` end up as the
+ * literal string "null" in the URL.
+ */
+function cleanParams(params = {}) {
+  return Object.fromEntries(
+    Object.entries(params).filter(([, v]) => v !== null && v !== undefined && v !== '')
+  );
+}
+
 export const homeworkAPI = {
   /**
    * Get my assignments
+   * Accepts { status, subject, difficulty, sort, limit, cursor }
    */
   async getMyAssignments(params = {}) {
-    const queryParams = new URLSearchParams(params).toString();
+    const queryParams = new URLSearchParams(cleanParams(params)).toString();
     const url = `/assignments${queryParams ? '?' + queryParams : ''}`;
     return await api.get(url);
   },
@@ -63,9 +75,10 @@ export const homeworkAPI = {
 
   /**
    * Get connections homework feed
+   * Accepts { subject, difficulty, sort, limit, cursor }
    */
   async getConnectionsHomework(params = {}) {
-    const queryParams = new URLSearchParams(params).toString();
+    const queryParams = new URLSearchParams(cleanParams(params)).toString();
     const url = `/homework/feed${queryParams ? '?' + queryParams : ''}`;
     return await api.get(url);
   },
@@ -89,7 +102,7 @@ export const homeworkAPI = {
    * Get homework I'm helping with
    */
   async getHelpingWith(params = {}) {
-    const queryParams = new URLSearchParams(params).toString();
+    const queryParams = new URLSearchParams(cleanParams(params)).toString();
     const url = `/homework/helping-with${queryParams ? '?' + queryParams : ''}`;
     return await api.get(url);
   },

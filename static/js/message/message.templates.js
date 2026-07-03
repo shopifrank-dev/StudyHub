@@ -26,7 +26,7 @@ export function conversationItemTemplate(conversation) {
   const timeAgo = lastMessage ? formatConversationTime(lastMessage.sent_at) : '';
 
   return `
-    <div class="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 active:bg-gray-100
+    <div class="flex items-center gap-3 px-4 py-3 hover:bg-[var(--bg-hover)] active:bg-[var(--bg-surface)]
                 transition-colors cursor-pointer conversation-item"
          data-action="open-conversation"
          data-partner-id="${partner.id}">
@@ -36,24 +36,24 @@ export function conversationItemTemplate(conversation) {
         <img src="${partner.avatar || '/static/default-avatar.png'}"
              alt="${escapeHtml(partner.name)}"
              loading="lazy"
-             class="w-12 h-12 rounded-full object-cover bg-gray-200">
+             class="w-12 h-12 rounded-full object-cover bg-[var(--bg-surface)]">
         <!-- Online dot -->
-        <span class="absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white
-                     ${isOnline ? 'bg-emerald-500' : 'bg-gray-300'}"></span>
+        <span class="absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-[var(--bg-card)]
+                     ${isOnline ? 'bg-[var(--success)]' : 'bg-[var(--text-tertiary)]'}"></span>
       </div>
 
       <!-- Info -->
       <div class="flex-1 min-w-0">
         <div class="flex items-center justify-between gap-2">
-          <span class="text-sm font-semibold text-gray-900 truncate">${escapeHtml(partner.name)}</span>
-          ${timeAgo ? `<span class="text-xs text-gray-400 flex-shrink-0">${timeAgo}</span>` : ''}
+          <span class="text-sm font-semibold text-[var(--text-primary)] truncate">${escapeHtml(partner.name)}</span>
+          ${timeAgo ? `<span class="text-xs text-[var(--text-meta)] flex-shrink-0">${timeAgo}</span>` : ''}
         </div>
         <div class="flex items-center justify-between gap-2 mt-0.5">
-          <p class="text-xs text-gray-500 truncate ${unreadCount > 0 ? 'font-semibold text-gray-800' : ''}">
+          <p class="text-xs text-[var(--text-secondary)] truncate ${unreadCount > 0 ? 'font-semibold text-[var(--text-primary)]' : ''}">
             ${escapeHtml(lastMessagePreview)}
           </p>
           ${unreadCount > 0 ? `
-            <span class="flex-shrink-0 min-w-[1.25rem] h-5 px-1.5 bg-indigo-600 text-white
+            <span class="flex-shrink-0 min-w-[1.25rem] h-5 px-1.5 bg-[var(--accent)] text-white
                          text-xs font-bold rounded-full flex items-center justify-center">
               ${unreadCount > 99 ? '99+' : unreadCount}
             </span>
@@ -102,7 +102,6 @@ export function conversationSkeletonTemplate() {
  * Generate message HTML
  */
  export function messageTemplate(message, currentUserId) {
-  showToast("Template function called");
   const isOwn        = message.sender_id === currentUserId;
   const senderName   = message.sender?.name || 'Unknown';
   const senderAvatar = message.sender?.avatar || '/static/default-avatar.png';
@@ -110,6 +109,13 @@ export function conversationSkeletonTemplate() {
 
   const statusClass = message.status ? `message-${message.status}` : '';
   const failedClass = message.status === 'failed' ? 'message-failed' : '';
+
+  // Bubble colors (own = accent, partner = white) are owned by message.css
+  // via `.message-own .message-bubble` / `.message-partner .message-bubble`.
+  // Don't add competing bg/text utility classes here — a compound class
+  // selector in CSS always beats a single utility class on the same
+  // element, so they'd be silently overridden anyway.
+  const metaColorClasses = isOwn ? 'text-white/70' : 'text-[var(--text-tertiary)]';
 
   return `
     <div class="message-wrapper message ${isOwn ? 'message-own' : 'message-partner'} ${statusClass} ${failedClass}"
@@ -126,7 +132,7 @@ export function conversationSkeletonTemplate() {
       ` : ''}
 
       <div class="message-content">
-        ${!isOwn ? `<div class="message-sender">${escapeHtml(senderName)}</div>` : ''}
+        ${!isOwn ? `<div class="message-sender text-[var(--text-secondary)]">${escapeHtml(senderName)}</div>` : ''}
 
         <div class="message-bubble">
           ${message.body ? `
@@ -139,7 +145,7 @@ export function conversationSkeletonTemplate() {
             </div>
           ` : ''}
 
-          <div class="message-meta">
+          <div class="message-meta ${metaColorClasses}">
             <span class="message-time">${timestamp}</span>
             ${isOwn && message.is_read
               ? '<span class="message-read-indicator">✓✓</span>'
@@ -156,20 +162,20 @@ export function conversationSkeletonTemplate() {
         ${message.reactions && Object.keys(message.reactions).length > 0 ? `
           <div class="message-reactions">
             ${Object.entries(message.reactions).map(([type, data]) => `
-              <span class="reaction-badge flex items-center gap-0.5 text-xs bg-white border
-                           border-gray-200 rounded-full px-2 py-0.5 shadow-sm cursor-pointer
-                           hover:bg-indigo-50 transition-colors"
+              <span class="reaction-badge flex items-center gap-0.5 text-xs bg-[var(--bg-surface)] border
+                           border-[var(--border-light)] rounded-full px-2 py-0.5 shadow-sm cursor-pointer
+                           hover:bg-[var(--accent-subtle)] transition-colors"
                     data-action="react-to-message"
                     data-reaction="${type}"
                     data-message-id="${message.id}">
-                ${data.emoji} <span class="font-medium text-gray-700">${data.count}</span>
+                ${data.emoji} <span class="font-medium text-[var(--text-secondary)]">${data.count}</span>
               </span>
             `).join('')}
           </div>
         ` : ''}
 
         ${message.status === 'failed' ? `
-          <button class="message-retry-btn"
+          <button class="message-retry-btn text-[var(--danger)]"
                   data-action="retry-message"
                   data-temp-id="${message.client_temp_id}">
             Retry
@@ -375,8 +381,8 @@ export function uploadProgressTemplate(filename, progress) {
 export function conversationHeaderTemplate(partner, isOnline) {
   return `
     <button data-action="back-to-conversations"
-            class="flex-shrink-0 p-2 -ml-1 rounded-full text-gray-600
-                   hover:bg-gray-100 active:bg-gray-200 transition-colors">
+            class="flex-shrink-0 p-2 -ml-1 rounded-full text-[var(--text-secondary)]
+                   hover:bg-[var(--bg-hover)] active:bg-[var(--bg-surface)] transition-colors">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
         <path d="M19 12H5M12 19l-7-7 7-7"/>
       </svg>
@@ -387,13 +393,13 @@ export function conversationHeaderTemplate(partner, isOnline) {
       <div class="relative flex-shrink-0">
         <img data-action='view-avatar' src="${partner.avatar || '/static/default-avatar.png'}"
              alt="${escapeHtml(partner.name)}"
-             class="w-9 h-9 rounded-full object-cover bg-gray-200">
-        <span class="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-white
-                     ${isOnline ? 'bg-emerald-500' : 'bg-gray-300'}"></span>
+             class="w-9 h-9 rounded-full object-cover bg-[var(--bg-surface)]">
+        <span class="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-[var(--bg-card)]
+                     ${isOnline ? 'bg-[var(--success)]' : 'bg-[var(--text-tertiary)]'}"></span>
       </div>
       <div class="min-w-0">
-        <h3 class="text-sm font-semibold text-gray-900 truncate leading-tight">${escapeHtml(partner.name)}</h3>
-        <span class="partner-status-text text-xs ${isOnline ? 'text-emerald-500' : 'text-gray-400'}">
+        <h3 class="text-sm font-semibold text-[var(--text-primary)] truncate leading-tight">${escapeHtml(partner.name)}</h3>
+        <span class="partner-status-text text-xs ${isOnline ? 'text-[var(--success)]' : 'text-[var(--text-meta)]'}">
           ${isOnline ? 'Online' : 'Offline'}
         </span>
       </div>
@@ -401,8 +407,8 @@ export function conversationHeaderTemplate(partner, isOnline) {
 
     <!-- Video Call Button -->
     <button data-action="video-call"
-            class="flex-shrink-0 p-2 rounded-full text-gray-500
-                   hover:bg-gray-100 active:bg-gray-200 transition-colors"
+            class="flex-shrink-0 p-2 rounded-full text-[var(--text-secondary)]
+                   hover:bg-[var(--bg-hover)] active:bg-[var(--bg-surface)] transition-colors"
             title="Video call">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <rect x="2" y="7" width="15" height="12" rx="2"/>
@@ -412,8 +418,8 @@ export function conversationHeaderTemplate(partner, isOnline) {
 
     <!-- Audio Call Button -->
     <button data-action="audio-call"
-            class="flex-shrink-0 p-2 rounded-full text-gray-500
-                   hover:bg-gray-100 active:bg-gray-200 transition-colors"
+            class="flex-shrink-0 p-2 rounded-full text-[var(--text-secondary)]
+                   hover:bg-[var(--bg-hover)] active:bg-[var(--bg-surface)] transition-colors"
             title="Audio call">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07
@@ -426,8 +432,8 @@ export function conversationHeaderTemplate(partner, isOnline) {
 
     <!-- Conversation Options Button -->
     <button data-action="open-conversation-options"
-            class="flex-shrink-0 p-2 -mr-1 rounded-full text-gray-500
-                   hover:bg-gray-100 active:bg-gray-200 transition-colors">
+            class="flex-shrink-0 p-2 -mr-1 rounded-full text-[var(--text-secondary)]
+                   hover:bg-[var(--bg-hover)] active:bg-[var(--bg-surface)] transition-colors">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
         <circle cx="12" cy="5" r="1.5"></circle>
         <circle cx="12" cy="12" r="1.5"></circle>
@@ -488,21 +494,21 @@ export function pendingAttachmentPreviewTemplate(attachment) {
 
       ${isImage && attachment.localUrl ? `
         <!-- Image thumbnail -->
-        <div class="w-16 h-16 rounded-xl overflow-hidden bg-gray-200 border border-gray-300">
+        <div class="w-16 h-16 rounded-xl overflow-hidden bg-[var(--bg-surface)] border border-[var(--border-light)]">
           <img src="${attachment.localUrl || attachment.url}"
                alt="${escapeHtml(attachment.filename)}"
                class="w-full h-full object-cover">
         </div>
       ` : `
         <!-- File chip -->
-        <div class="flex items-center gap-2 px-3 py-2 bg-gray-100 rounded-xl border border-gray-200
+        <div class="flex items-center gap-2 px-3 py-2 bg-[var(--bg-surface)] rounded-xl border border-[var(--border-light)]
                     max-w-[160px]">
-          <svg class="w-4 h-4 flex-shrink-0 text-indigo-500" fill="none" stroke="currentColor"
+          <svg class="w-4 h-4 flex-shrink-0 text-[var(--accent)]" fill="none" stroke="currentColor"
                stroke-width="2" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round"
                   d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
           </svg>
-          <span class="text-xs text-gray-700 truncate leading-tight">${escapeHtml(attachment.filename)}</span>
+          <span class="text-xs text-[var(--text-secondary)] truncate leading-tight">${escapeHtml(attachment.filename)}</span>
         </div>
       `}
 
@@ -522,9 +528,9 @@ export function pendingAttachmentPreviewTemplate(attachment) {
       ${!isUploading ? `
         <button data-action="remove-pending-attachment"
                 data-attachment-id="${attachment.id}"
-                class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-gray-700 text-white
+                class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-[var(--primary-active)] text-white
                        flex items-center justify-center opacity-0 group-hover:opacity-100
-                       transition-opacity hover:bg-red-600 z-10">
+                       transition-opacity hover:bg-[var(--danger)] z-10">
           <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
           </svg>
@@ -557,8 +563,8 @@ export function deletedMessageTemplate(message, currentUserId) {
       ` : ''}
 
       <div class="message-content">
-        <div class="message-bubble opacity-60 italic">
-          <div class="flex items-center gap-1.5 text-gray-400 text-sm">
+        <div class="message-bubble opacity-60 italic bg-[var(--bg-surface)]">
+          <div class="flex items-center gap-1.5 text-[var(--text-meta)] text-sm">
             <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor"
                  stroke-width="2" viewBox="0 0 24 24">
               <polyline points="3 6 5 6 21 6"/>
@@ -575,22 +581,22 @@ export function deletedMessageTemplate(message, currentUserId) {
 export function blockedByMeNoticeTemplate(partnerName) {
   return `
     <div class="flex flex-col items-center justify-center gap-3 py-4 px-6
-                bg-gray-50 border-t border-gray-200 text-center">
-      <div class="flex items-center gap-2 text-gray-500">
+                bg-[var(--bg-surface)] border-t border-[var(--border-light)] text-center">
+      <div class="flex items-center gap-2 text-[var(--text-secondary)]">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
              stroke="currentColor" stroke-width="2">
           <circle cx="12" cy="12" r="10"/>
           <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
         </svg>
-        <span class="text-sm font-medium text-gray-600">
+        <span class="text-sm font-medium text-[var(--text-primary)]">
           You blocked <strong>${escapeHtml(partnerName)}</strong>
         </span>
       </div>
-      <p class="text-xs text-gray-400">
+      <p class="text-xs text-[var(--text-meta)]">
         You can't send or receive messages from this person.
       </p>
       <button data-action="unblock-message-user"
-              class="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700
+              class="px-5 py-2 rounded-xl bg-[var(--accent)] hover:bg-[var(--accent-hover)]
                      active:scale-95 text-white text-sm font-semibold
                      transition-all duration-150">
         Unblock ${escapeHtml(partnerName)}
@@ -606,18 +612,18 @@ export function blockedByMeNoticeTemplate(partnerName) {
 export function blockedByPartnerNoticeTemplate(partnerName) {
   return `
     <div class="flex flex-col items-center justify-center gap-2 py-4 px-6
-                bg-gray-50 border-t border-gray-200 text-center">
-      <div class="flex items-center gap-2 text-gray-500">
+                bg-[var(--bg-surface)] border-t border-[var(--border-light)] text-center">
+      <div class="flex items-center gap-2 text-[var(--text-secondary)]">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
              stroke="currentColor" stroke-width="2">
           <circle cx="12" cy="12" r="10"/>
           <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
         </svg>
-        <span class="text-sm font-medium text-gray-600">
+        <span class="text-sm font-medium text-[var(--text-primary)]">
           You can't message <strong>${escapeHtml(partnerName)}</strong>
         </span>
       </div>
-      <p class="text-xs text-gray-400">
+      <p class="text-xs text-[var(--text-meta)]">
         This person is not accepting messages from you.
       </p>
     </div>

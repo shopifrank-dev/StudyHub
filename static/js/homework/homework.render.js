@@ -2,6 +2,8 @@
  * ============================================================================
  * HOMEWORK RENDER FUNCTIONS
  * DOM manipulation and rendering logic
+ * Includes cursor-based infinite scroll (IntersectionObserver) for the
+ * "My Work" and "Connections" tabs.
  * ============================================================================
  */
 
@@ -12,10 +14,60 @@ import {
   renderMyHomeworkList,
   renderMyHomeworkCard,
   renderConnectionsHomeworkList,
+  renderConnectionsHomeworkCard,
   renderLoadingState
 } from './homework.templates.js';
 import { showHomeworkToast } from './homework.utils.js';
 import { loadStatsTab, loadDynamicStatsComponents} from './homework.stats.js';
+
+// How many items to fetch per page for both infinite-scroll lists
+const PAGE_SIZE = 15;
+
+// Kept module-level so we can disconnect a stale observer before creating
+// a new one (tab switches / refreshes re-render the DOM the observer was
+// watching, so the old node references go stale).
+let myHomeworkObserver = null;
+let connectionsObserver = null;
+
+function disconnectObserver(observer) {
+  if (observer) observer.disconnect();
+}
+
+/**
+ * Watches the sentinel element rendered at the bottom of a homework list.
+ * When it scrolls into view, `onLoadMore` is invoked to fetch the next page.
+ */
+function setupInfiniteScroll(prefix, onLoadMore) {
+  const sentinel = document.getElementById(`hw-${prefix}-sentinel`);
+  if (!sentinel) return null;
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        onLoadMore();
+      }
+    });
+  }, { root: null, rootMargin: '250px', threshold: 0 });
+
+  observer.observe(sentinel);
+  return observer;
+}
+
+/**
+ * Once a list runs out of pages, swap the sentinel/spinner for a static
+ * "end of list" message and stop observing.
+ */
+function updatePaginationFooter(prefix, hasMore) {
+  if (hasMore) return;
+
+  const sentinel = document.getElementById(`hw-${prefix}-sentinel`);
+  const loadMoreEl = document.getElementById(`hw-${prefix}-load-more`);
+
+  if (loadMoreEl) {
+    loadMoreEl.outerHTML = `<div class="hw-list-end" style="text-align:center;padding:16px 0;color:var(--text-secondary,#9ca3af);font-size:0.82rem;">You're all caught up 🎉</div>`;
+  }
+  if (sentinel) sentinel.remove();
+}
 
 function renderMyHomeworkFromCache() {
   const container = document.getElementById('my-homework-container');
@@ -23,8 +75,12 @@ function renderMyHomeworkFromCache() {
 
   container.innerHTML = renderMyHomeworkList(
     homeworkState.myAssignments,
-    homeworkState.myAssignmentsStats
+    homeworkState.myAssignmentsStats,
+    homeworkState.myAssignmentsHasMore
   );
+
+  disconnectObserver(myHomeworkObserver);
+  myHomeworkObserver = setupInfiniteScroll('my', loadMoreMyHomework);
 }
 
 /**
@@ -35,8 +91,12 @@ function renderConnectionsHomeworkFromCache() {
   if (!container) return;
 
   container.innerHTML = renderConnectionsHomeworkList(
-    homeworkState.connectionsHomework
+    homeworkState.connectionsHomework,
+    homeworkState.connectionsHasMore
   );
+
+  disconnectObserver(connectionsObserver);
+  connectionsObserver = setupInfiniteScroll('connections', loadMoreConnectionsHomework);
 }
 
 /**
@@ -124,7 +184,7 @@ export function switchTab(tab) {
   }
 }
 /**
- * Load my homework
+ * Load my homework — first page only. Resets pagination state.
  */
 export async function loadMyHomework() {
   const container = document.getElementById('my-homework-container');
@@ -137,19 +197,24 @@ export async function loadMyHomework() {
     container.innerHTML = renderLoadingState();
     homeworkState.setLoading('myHomework', true);
 
-    // Fetch data
+    // Fetch first page
     const response = await homeworkAPI.getMyAssignments({
-      status: homeworkState.filters.status
+      status: homeworkState.filters.status,
+      limit: PAGE_SIZE
     });
 
     homeworkState.setLoading('myHomework', false);
 
     if (response.status === 'success') {
-      homeworkState.setMyAssignments(response.data);
+      homeworkState.setMyAssignments(response.data, false);
       container.innerHTML = renderMyHomeworkList(
-        response.data.assignments,
-        response.data.stats
+        homeworkState.myAssignments,
+        homeworkState.myAssignmentsStats,
+        homeworkState.myAssignmentsHasMore
       );
+
+      disconnectObserver(myHomeworkObserver);
+      myHomeworkObserver = setupInfiniteScroll('my', loadMoreMyHomework);
     } else {
       throw new Error(response.message || 'Failed to load homework');
     }
@@ -168,7 +233,55 @@ export async function loadMyHomework() {
 }
 
 /**
- * Load connections homework
+ * Fetch and append the next page of "My Work" assignments.
+ * Triggered by the IntersectionObserver when the sentinel scrolls into view.
+ */
+async function loadMoreMyHomework() {
+  if (homeworkState.myAssignmentsLoadingMore || !homeworkState.myAssignmentsHasMore) return;
+
+  homeworkState.myAssignmentsLoadingMore = true;
+  const loadMoreEl = document.getElementById('hw-my-load-more');
+  if (loadMoreEl) loadMoreEl.classList.remove('hidden');
+
+  try {
+    const response = await homeworkAPI.getMyAssignments({
+      status: homeworkState.filters.status,
+      limit: PAGE_SIZE,
+      cursor: homeworkState.myAssignmentsCursor
+    });
+
+    if (response.status === 'success') {
+      const newAssignments = response.data.assignments || [];
+      homeworkState.setMyAssignments(response.data, true);
+
+      const list = document.getElementById('hw-my-list');
+      if (list) {
+        newAssignments.forEach(assignment => {
+          list.insertAdjacentHTML('beforeend', renderMyHomeworkCard(assignment));
+        });
+      }
+
+      updatePaginationFooter('my', homeworkState.myAssignmentsHasMore);
+
+      if (!homeworkState.myAssignmentsHasMore) {
+        disconnectObserver(myHomeworkObserver);
+        myHomeworkObserver = null;
+      }
+    } else {
+      throw new Error(response.message || 'Failed to load more homework');
+    }
+  } catch (error) {
+    console.error('Error loading more homework:', error);
+    showHomeworkToast('Failed to load more homework', 'error');
+  } finally {
+    homeworkState.myAssignmentsLoadingMore = false;
+    const loadMoreElAfter = document.getElementById('hw-my-load-more');
+    if (loadMoreElAfter) loadMoreElAfter.classList.add('hidden');
+  }
+}
+
+/**
+ * Load connections homework — first page only. Resets pagination state.
  */
 export async function loadConnectionsHomework() {
   const container = document.getElementById('connections-homework-container');
@@ -180,14 +293,20 @@ export async function loadConnectionsHomework() {
     container.innerHTML = renderLoadingState();
     homeworkState.setLoading('connectionsHomework', true);
 
-    // Fetch data
-    const response = await homeworkAPI.getConnectionsHomework();
+    // Fetch first page
+    const response = await homeworkAPI.getConnectionsHomework({ limit: PAGE_SIZE });
 
     homeworkState.setLoading('connectionsHomework', false);
 
     if (response.status === 'success') {
-      homeworkState.setConnectionsHomework(response.data);
-      container.innerHTML = renderConnectionsHomeworkList(response.data.homework);
+      homeworkState.setConnectionsHomework(response.data, false);
+      container.innerHTML = renderConnectionsHomeworkList(
+        homeworkState.connectionsHomework,
+        homeworkState.connectionsHasMore
+      );
+
+      disconnectObserver(connectionsObserver);
+      connectionsObserver = setupInfiniteScroll('connections', loadMoreConnectionsHomework);
     } else {
       throw new Error(response.message || 'Failed to load connections homework');
     }
@@ -202,6 +321,53 @@ export async function loadConnectionsHomework() {
         </button>
       </div>
     `;
+  }
+}
+
+/**
+ * Fetch and append the next page of connections homework.
+ * Triggered by the IntersectionObserver when the sentinel scrolls into view.
+ */
+async function loadMoreConnectionsHomework() {
+  if (homeworkState.connectionsLoadingMore || !homeworkState.connectionsHasMore) return;
+
+  homeworkState.connectionsLoadingMore = true;
+  const loadMoreEl = document.getElementById('hw-connections-load-more');
+  if (loadMoreEl) loadMoreEl.classList.remove('hidden');
+
+  try {
+    const response = await homeworkAPI.getConnectionsHomework({
+      limit: PAGE_SIZE,
+      cursor: homeworkState.connectionsCursor
+    });
+
+    if (response.status === 'success') {
+      const newItems = response.data.homework || [];
+      homeworkState.setConnectionsHomework(response.data, true);
+
+      const list = document.getElementById('hw-connections-list');
+      if (list) {
+        newItems.forEach(hw => {
+          list.insertAdjacentHTML('beforeend', renderConnectionsHomeworkCard(hw));
+        });
+      }
+
+      updatePaginationFooter('connections', homeworkState.connectionsHasMore);
+
+      if (!homeworkState.connectionsHasMore) {
+        disconnectObserver(connectionsObserver);
+        connectionsObserver = null;
+      }
+    } else {
+      throw new Error(response.message || 'Failed to load more homework');
+    }
+  } catch (error) {
+    console.error('Error loading more connections homework:', error);
+    showHomeworkToast('Failed to load more homework', 'error');
+  } finally {
+    homeworkState.connectionsLoadingMore = false;
+    const loadMoreElAfter = document.getElementById('hw-connections-load-more');
+    if (loadMoreElAfter) loadMoreElAfter.classList.add('hidden');
   }
 }
 

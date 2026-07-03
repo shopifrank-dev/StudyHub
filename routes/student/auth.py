@@ -3,7 +3,6 @@
 from flask import Blueprint, request, jsonify, redirect, url_for, current_app, make_response, render_template, session
 from werkzeug.security import generate_password_hash, check_password_hash
 import re
-import set_env
 import random
 from flask_dance.contrib.google import make_google_blueprint, google
 from flask_dance.consumer import oauth_authorized

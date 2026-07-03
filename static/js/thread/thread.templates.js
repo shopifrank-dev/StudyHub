@@ -345,8 +345,8 @@ export function threadMessageTemplate(message, currentUserId) {
   const avatarHtml = avatarUrl
     ? `<img src="${avatarUrl}" class="msg-avatar w-8 h-8 rounded-full object-cover flex-shrink-0"
             alt="${senderName}" loading="lazy">`
-    : `<div class="msg-avatar-placeholder flex-shrink-0 w-8 h-8 rounded-full bg-indigo-100
-                   text-indigo-700 text-xs font-bold flex items-center justify-center select-none">
+    : `<div class="msg-avatar-placeholder flex-shrink-0 w-8 h-8 rounded-full bg-accent-subtle
+                   text-accent text-xs font-bold flex items-center justify-center select-none">
          ${(sender.name ?? '?').charAt(0).toUpperCase()}
        </div>`;
 
@@ -387,8 +387,8 @@ export function threadMessageTemplate(message, currentUserId) {
     const mine = Array.isArray(r.users) && r.users.includes(currentUserId);
     return `<button class="reaction-pill flex items-center gap-1 text-xs rounded-full px-2 py-0.5
                      transition-colors ${mine
-                       ? 'bg-indigo-100 text-indigo-700 ring-1 ring-indigo-300'
-                       : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
+                       ? 'bg-accent-subtle text-accent ring-1 ring-accent-border'
+                       : 'bg-surface-raised text-ink-secondary hover:bg-surface-hover'}"
                data-action="thread-react"
                data-message-id="${message.id}"
                data-emoji="${escAttr(r.emoji)}">
@@ -414,14 +414,14 @@ export function threadMessageTemplate(message, currentUserId) {
   // ── AI badge ──────────────────────────────────────────────────────────────
   const aiBadge = message.is_ai_response
     ? `<span class="msg-ai-badge inline-flex items-center gap-1 text-xs font-medium
-                    text-violet-700 bg-violet-100 rounded-full px-2 py-0.5 mb-1 self-start">
+                    text-violet-300 bg-violet-500/15 rounded-full px-2 py-0.5 mb-1 self-start">
          🤖 ${esc(aiPersonality)}
        </span>`
     : '';
 
   // ── Retry button ──────────────────────────────────────────────────────────
   const retryHtml = message.status === MSG_STATUS.FAILED
-    ? `<button class="msg-retry-btn text-xs text-red-500 hover:text-red-700 underline mt-0.5 px-1"
+    ? `<button class="msg-retry-btn text-xs text-red-400 hover:text-red-300 underline mt-0.5 px-1"
                data-action="thread-retry"
                data-temp-id="${escAttr(message.client_temp_id ?? '')}">
          Retry
@@ -431,8 +431,8 @@ export function threadMessageTemplate(message, currentUserId) {
   // ── Options button (Issue 3: CSS-only visibility) ─────────────────────────
   const optionsBtn = !message.is_deleted && hasId
     ? `<button class="msg-options-btn absolute ${isMine ? 'left-0 -translate-x-full' : 'right-0 translate-x-full'}
-                      top-0 w-7 h-7 rounded-full bg-white shadow-sm border border-gray-200 text-gray-500
-                      hover:text-indigo-600 hover:border-indigo-300 flex items-center justify-center
+                      top-0 w-7 h-7 rounded-full bg-surface-card shadow-sm border border-line text-ink-secondary
+                      hover:text-accent hover:border-accent-border flex items-center justify-center
                       text-xs select-none"
                data-action="thread-open-options"
                data-message-id="${message.id}"
@@ -444,8 +444,8 @@ export function threadMessageTemplate(message, currentUserId) {
   // ── Quick-reply button (theirs messages, desktop hover-only via CSS) ──────
   const quickReplyBtn = !isMine && !message.is_deleted && hasId
     ? `<button class="msg-quick-reply-btn absolute right-0 translate-x-full top-0
-                       w-7 h-7 rounded-full bg-white shadow-sm border border-gray-200
-                       text-gray-500 hover:text-indigo-600 flex items-center justify-center
+                       w-7 h-7 rounded-full bg-surface-card shadow-sm border border-line
+                       text-ink-secondary hover:text-accent flex items-center justify-center
                        text-xs select-none"
                data-action="thread-reply"
                data-message-id="${message.id}"
@@ -459,7 +459,7 @@ export function threadMessageTemplate(message, currentUserId) {
       <div class="${bubbleColClass} relative">
         ${optionsBtn}
         ${quickReplyBtn}
-        ${!isMine ? `<span class="msg-sender-name text-[11px] font-semibold text-gray-500 px-1 mb-0.5">${senderName}</span>` : ''}
+        ${!isMine ? `<span class="msg-sender-name text-[11px] font-semibold text-ink-meta px-1 mb-0.5">${senderName}</span>` : ''}
         ${aiBadge}
         <div class="${bubbleClass}">
           ${pinBadge}
@@ -470,7 +470,7 @@ export function threadMessageTemplate(message, currentUserId) {
         </div>
         ${reactionsHtml}
         <div class="msg-meta flex items-center gap-1.5 px-1 mt-0.5">
-          <span class="msg-time text-[10px] text-gray-400">${time}</span>
+          <span class="msg-time text-[10px] text-ink-tertiary">${time}</span>
           ${statusHtml}
           ${retryHtml}
         </div>
@@ -586,7 +586,7 @@ export function pinnedMessagesBannerTemplate(pinnedMessages) {
 
   return `
     <div class="thread-pinned-banner flex items-center gap-2 px-3 py-2
-                bg-amber-50 border-b border-amber-100"
+                bg-amber-500/10 border-b border-amber-500/20"
          data-pin-index="0" data-pin-count="${count}" data-pins="${pinsJson}">
 
       <button class="pin-icon-btn text-base flex-shrink-0 hover:scale-110 transition-transform"
@@ -596,26 +596,26 @@ export function pinnedMessagesBannerTemplate(pinnedMessages) {
       <div class="pin-content flex-1 min-w-0 cursor-pointer"
            data-action="thread-scroll-to-message" data-message-id="${first.id}">
         ${count > 1
-          ? `<span class="text-[10px] font-bold text-amber-600 uppercase tracking-wide">
+          ? `<span class="text-[10px] font-bold text-amber-400 uppercase tracking-wide">
                ${count} pinned
              </span>`
           : ''}
-        <p class="pin-sender text-xs font-semibold text-amber-800 leading-tight">${firstSender}</p>
-        <p class="pin-text text-xs text-gray-600 truncate">${firstText}</p>
+        <p class="pin-sender text-xs font-semibold text-amber-300 leading-tight">${firstSender}</p>
+        <p class="pin-text text-xs text-ink-secondary truncate">${firstText}</p>
       </div>
 
       ${count > 1 ? `
       <div class="flex flex-col gap-0.5">
         <button class="pin-nav-btn w-5 h-5 rounded flex items-center justify-center text-[10px]
-                       text-gray-400 hover:text-amber-600 hover:bg-amber-100 transition-colors"
+                       text-ink-tertiary hover:text-amber-400 hover:bg-amber-500/15 transition-colors"
                 data-pin-dir="-1" aria-label="Previous pin">▲</button>
         <button class="pin-nav-btn w-5 h-5 rounded flex items-center justify-center text-[10px]
-                       text-gray-400 hover:text-amber-600 hover:bg-amber-100 transition-colors"
+                       text-ink-tertiary hover:text-amber-400 hover:bg-amber-500/15 transition-colors"
                 data-pin-dir="1" aria-label="Next pin">▼</button>
       </div>` : ''}
 
-      <button class="flex-shrink-0 text-xs font-semibold text-amber-700 hover:text-amber-900
-                     px-2 py-1 rounded hover:bg-amber-100 transition-colors"
+      <button class="flex-shrink-0 text-xs font-semibold text-amber-400 hover:text-amber-200
+                     px-2 py-1 rounded hover:bg-amber-500/15 transition-colors"
               data-action="thread-open-pinned-list">All</button>
     </div>`;
 }
@@ -631,19 +631,19 @@ export function searchResultItemTemplate(result, query) {
   const highlighted = query
     ? escaped.replace(
         new RegExp(esc(query).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'),
-        (m) => `<mark class="bg-indigo-100 text-indigo-800 rounded px-0.5 not-italic">${m}</mark>`
+        (m) => `<mark class="bg-accent-subtle text-accent rounded px-0.5 not-italic">${m}</mark>`
       )
     : escaped;
 
   return `
-    <div class="px-4 py-3 hover:bg-indigo-50/40 active:bg-indigo-50 cursor-pointer"
+    <div class="px-4 py-3 hover:bg-surface-hover active:bg-surface-hover cursor-pointer"
          data-action="thread-scroll-to-message" data-message-id="${result.id}"
          role="button" tabindex="0">
       <div class="flex items-center justify-between mb-1">
-        <span class="text-xs font-semibold text-gray-700">${senderName}</span>
-        <span class="text-[11px] text-gray-400">${time}</span>
+        <span class="text-xs font-semibold text-ink-secondary">${senderName}</span>
+        <span class="text-[11px] text-ink-tertiary">${time}</span>
       </div>
-      <p class="text-sm text-gray-600 leading-snug">${highlighted}</p>
+      <p class="text-sm text-ink-secondary leading-snug">${highlighted}</p>
     </div>`;
 }
 
@@ -653,7 +653,7 @@ export function searchResultItemTemplate(result, query) {
 export function systemMessageTemplate(text) {
   return `
     <div class="thread-system-message flex items-center justify-center py-2 px-4">
-      <span class="text-xs text-gray-400 bg-gray-100 rounded-full px-3 py-1">${esc(text)}</span>
+      <span class="text-xs text-ink-tertiary bg-surface-raised rounded-full px-3 py-1">${esc(text)}</span>
     </div>`;
 }
 
@@ -665,13 +665,13 @@ export function typingIndicatorTemplate(text) {
     <div id="thread-typing-indicator"
          class="thread-typing-indicator flex items-center gap-2 px-4 py-2">
       <div class="flex items-center gap-0.5">
-        <span class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"
+        <span class="w-1.5 h-1.5 bg-ink-tertiary rounded-full animate-bounce"
               style="animation-delay:0ms"></span>
-        <span class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"
+        <span class="w-1.5 h-1.5 bg-ink-tertiary rounded-full animate-bounce"
               style="animation-delay:150ms"></span>
-        <span class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"
+        <span class="w-1.5 h-1.5 bg-ink-tertiary rounded-full animate-bounce"
               style="animation-delay:300ms"></span>
       </div>
-      <span class="typing-text text-xs text-gray-400">${esc(text)}</span>
+      <span class="typing-text text-xs text-ink-tertiary">${esc(text)}</span>
     </div>`;
 }

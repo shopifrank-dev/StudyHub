@@ -84,8 +84,6 @@ class SupabaseStorage:
         self.service_role_key = SERVICE_ROLE_KEY
         self.supabase_url = SUPABASE_URL
         
-        if not all([self.supabase_url, self.service_role_key, self.bucket]):
-            raise ValueError("Supabase configuration missing")
 
     def upload_file(self, file, folder, filename, content_type="application/octet-stream"):
         """
@@ -136,8 +134,6 @@ class FilenameService:
     @staticmethod
     def _get_extension(original_filename):
         """Extract and validate file extension"""
-        if '.' not in original_filename:
-            raise ValueError("File has no extension")
         
         ext = original_filename.rsplit('.', 1)[1].lower()
         return ext
@@ -334,8 +330,6 @@ class CloudinaryStorage:
         self.api_name = API_NAME
         self.api_key = API_KEY
         self.api_secret = API_SECRET
-        if not all([self.api_name, self.api_key, self.api_secret]):
-            raise ValueError("Cloudinary setup details incomplete")
     
     def upload_file(self, file, folder, filename, resource_type="auto"):
         """

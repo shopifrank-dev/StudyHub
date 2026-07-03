@@ -56,6 +56,32 @@ function renderResourcesSection(resources) {
 }
 
 /**
+ * Pagination footer shared by "My Work" and "Connections" lists.
+ * - If there are more pages: renders an (invisible) scroll sentinel the
+ *   IntersectionObserver watches, plus a "loading more" indicator.
+ * - If there are no more pages: renders a simple end-of-list message.
+ * - If the list is empty: renders nothing (empty state handles that case).
+ *
+ * `prefix` is 'my' or 'connections' — used to build predictable element ids
+ * that homework.render.js hooks into (hw-{prefix}-sentinel / hw-{prefix}-load-more).
+ */
+function renderPaginationFooter(prefix, hasMore, itemCount) {
+  if (!itemCount) return '';
+
+  if (hasMore) {
+    return `
+      <div id="hw-${prefix}-sentinel" class="hw-scroll-sentinel" style="height:1px;width:100%;"></div>
+      <div id="hw-${prefix}-load-more" class="hw-load-more hidden" style="display:flex;align-items:center;justify-content:center;gap:8px;padding:16px 0;color:var(--text-secondary,#6b7280);font-size:0.85rem;">
+        <div class="hw-spinner hw-spinner-sm" style="width:16px;height:16px;flex-shrink:0;"></div>
+        <span>Loading more...</span>
+      </div>
+    `;
+  }
+
+  return `<div class="hw-list-end" style="text-align:center;padding:16px 0;color:var(--text-secondary,#9ca3af);font-size:0.82rem;">You're all caught up 🎉</div>`;
+}
+
+/**
  * Main homework section template
  */
 export function renderHomeworkSection() {
@@ -133,8 +159,11 @@ export function renderHomeworkSection() {
 
 /**
  * My homework list template
+ * @param {Array} assignments - current set of loaded assignments (may span multiple pages)
+ * @param {Object} stats - status counts (always reflects the FULL filtered set, not just loaded pages)
+ * @param {boolean} hasMore - whether more pages are available to infinite-scroll load
  */
-export function renderMyHomeworkList(assignments, stats) {
+export function renderMyHomeworkList(assignments, stats, hasMore = false) {
   if (!assignments || assignments.length === 0) {
     return renderEmptyState('my-homework');
   }
@@ -161,9 +190,11 @@ export function renderMyHomeworkList(assignments, stats) {
     </div>
 
     <!-- Assignments List -->
-    <div class="hw-list">
+    <div class="hw-list" id="hw-my-list">
       ${assignments.map(assignment => renderMyHomeworkCard(assignment)).join('')}
     </div>
+
+    ${renderPaginationFooter('my', hasMore, assignments.length)}
   `;
 }
 
@@ -285,16 +316,19 @@ export function renderMyHomeworkCard(assignment) {
 
 /**
  * Connections homework list template
+ * @param {Array} homework - current set of loaded homework items (may span multiple pages)
+ * @param {boolean} hasMore - whether more pages are available to infinite-scroll load
  */
-export function renderConnectionsHomeworkList(homework) {
+export function renderConnectionsHomeworkList(homework, hasMore = false) {
   if (!homework || homework.length === 0) {
     return renderEmptyState('connections-homework');
   }
 
   return `
-    <div class="hw-list">
+    <div class="hw-list" id="hw-connections-list">
       ${homework.map(hw => renderConnectionsHomeworkCard(hw)).join('')}
     </div>
+    ${renderPaginationFooter('connections', hasMore, homework.length)}
   `;
 }
 

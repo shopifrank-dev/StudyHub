@@ -1,6 +1,5 @@
 import requests
 import os
-import set_env
 
 # Your Supabase details
 

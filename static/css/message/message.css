@@ -163,16 +163,18 @@
   position: relative;
 }
 
-/* Partner bubble shape */
+/* Partner bubble shape — kept white so received messages stand out
+   against the graphite shell, per product decision */
 .message-partner .message-bubble {
-  background: var(--bg-card);
+  background: #FFFFFF;
+  color: var(--primary-dark);
   border-bottom-left-radius: 0.25rem;
 }
 
 /* Own bubble shape */
 .message-own .message-bubble {
-  background: var(--primary);   /* primary */
-  color: var(--text-primary);
+  background: var(--accent);   /* accent, not flat graphite */
+  color: #FFFFFF;
   border-bottom-right-radius: 0.25rem;
 }
 
@@ -227,7 +229,7 @@
   font-size: 0.7rem;
   opacity: 0.75;
 }
-.message-read-indicator    { color: rgba(99,102,241,0.75); }  /* accent tint inside own bubble */
+.message-read-indicator    { color: rgba(255,255,255,0.85); }  /* white tick reads on accent-colored own bubble */
 .message-pending-indicator { font-size: 0.7rem; opacity: 0.65; }
 
 /* Retry button */

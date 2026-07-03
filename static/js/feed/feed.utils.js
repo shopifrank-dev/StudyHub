@@ -315,7 +315,6 @@ export function openLearnora(postId) {
  */
 export function searchTag(tag) {
   if (typeof showToast === 'function') {
-    showToast(`Searching for tag: ${tag}`, 'info');
   }
   if (typeof navigateTo === 'function') {
     navigateTo('search');
@@ -379,7 +378,6 @@ export function navigateTo(sectionId, event) {
             item.classList.add('active');
         }
     });
-    closeMobileSidebar();
     
 
     
@@ -407,9 +405,13 @@ export function openModal(modalId) {
     modal.classList.remove('hidden');
     document.body.style.overflow = 'hidden';
 
-    // Hide the header whenever any modal is open
-    const header = document.getElementById('header');
-    if (header) header.classList.add('hidden');
+    // Hide the whole fixed top bar whenever any modal is open.
+    // #header-bar is the actual position:fixed element (it owns the
+    // background/shadow/z-index); #header is just the inner piece with
+    // the logo + create-btn. Hiding only #header left #header-bar behind
+    // as an empty fixed strip still pinned to the top of the screen.
+    const headerBar = document.getElementById('header-bar');
+    if (headerBar) headerBar.classList.add('hidden');
   }
 }
 
@@ -418,7 +420,7 @@ export function openModal(modalId) {
  * Close modal - ADDED EXPORT & ENHANCED CLEANUP
  */
 export function closeModal(modalId) {
-  const header = document.getElementById("header");
+  const headerBar = document.getElementById("header-bar");
   const modal = document.getElementById(modalId);
   if (modal) {
     modal.classList.remove('active');
@@ -426,8 +428,14 @@ export function closeModal(modalId) {
     
     document.body.style.overflow = '';
 
-    // Show the header again whenever a modal closes
-    if (header) header.classList.remove('hidden');
+    // Show the whole fixed top bar again, but only if no OTHER modal/overlay
+    // is still open. Covers both conventions used in this codebase:
+    //   - standard modals: class="modal active"
+    //   - tag-posts-modal: class="posts-modal hidden" (no "active" class)
+    const tagModal = document.getElementById("tag-posts-modal");
+    const tagModalOpen = tagModal && !tagModal.classList.contains("hidden");
+    const anyOtherModalOpen = document.querySelector('.modal.active') || tagModalOpen;
+    if (headerBar && !anyOtherModalOpen) headerBar.classList.remove('hidden');
 
     // Special cleanup for comment modal
     if (modalId === 'post-comments-modal') {
@@ -487,6 +495,8 @@ export function closeModal(modalId) {
     }
   }
 }
+
+
 
 /**
  * Toggle post options menu
@@ -563,4 +573,5 @@ if (typeof window !== 'undefined') {
   window.closeModal = closeModal;
   window.ShowNotification = ShowNotification;
   window.navigateTo = navigateTo;
+
 }

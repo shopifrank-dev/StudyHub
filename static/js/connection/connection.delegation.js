@@ -73,10 +73,7 @@ export const ConnectionHandlers = {
     event.stopPropagation();
     closeStudySessionResourcePreview();
   },
-  'toggle-mobile-sidebar': (target, event) => {
-    event.stopPropagation();
-    document.getElementById("sections-sidebar")?.classList.contains('hidden')? openModal('sections-sidebar'):closeModal('sections-sidebar');
-  },
+  
   'preview-study-session-resource': (target, event) => {
     const url = target.dataset.url;
     const name = target.dataset.name;

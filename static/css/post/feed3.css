@@ -238,6 +238,39 @@ body {
   box-shadow: var(--shadow-sm);
 }
 
+/* ── #header-bar ─────────────────────────────────────────────────────────
+   The mobile sidebar-toggle button now lives outside <header> for JS reasons
+   (so functions that hide #header don't also hide the toggle). #header-bar
+   takes over the fixed-position "bar" role that .header used to have on its
+   own, and .header becomes a flex:1 child inside it — visually identical to
+   before, but the toggle button is a true DOM sibling of <header>. */
+#header-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-lg);
+  padding-left: var(--spacing-lg);
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--border);
+  z-index: var(--z-fixed);
+  box-shadow: var(--shadow-sm);
+}
+
+#header-bar .header {
+  position: static;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  background: transparent;
+  border-bottom: none;
+  box-shadow: none;
+  padding: 0 var(--spacing-lg) 0 0; /* left edge spacing now owned by #header-bar */
+}
+
 .logo {
   display: flex;
   align-items: center;
@@ -2421,6 +2454,15 @@ body {
     gap: var(--spacing-md);
   }
 
+  #header-bar {
+    padding-left: var(--spacing-md);
+    gap: var(--spacing-md);
+  }
+
+  #header-bar .header {
+    padding-right: var(--spacing-md);
+  }
+
   .mobile-menu-btn {
     display: flex;
   }
@@ -2457,6 +2499,16 @@ body {
   .sidebar {
     transform: translateX(-100%);
     width: 280px;
+    /* merged from a second, far-away duplicate @media block that
+       previously also declared position/top/left/height/z-index for
+       .sidebar at this same breakpoint */
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100dvh;
+    z-index: var(--z-fixed, 1030);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    padding-top: 72px; /* push nav items below the 64px header */
   }
 
   .sidebar.active {
@@ -2581,6 +2633,15 @@ body {
   .header {
     height: 56px;
     padding: 0 var(--spacing-sm);
+  }
+
+  #header-bar {
+    height: 56px;
+    padding-left: var(--spacing-sm);
+  }
+
+  #header-bar .header {
+    padding-right: var(--spacing-sm);
   }
 
   .main-layout {
@@ -2773,6 +2834,7 @@ a:focus-visible {
 }
 @media print {
   .header,
+  #header-bar,
   .sidebar,
   .bottom-nav,
   .ai-fab,
@@ -4859,7 +4921,8 @@ body {
 .comment-card,
 .modal,
 .sidebar,
-.header {
+.header,
+#header-bar {
   background: var(--bg-card) !important;
   color: var(--text-primary) !important;
 }
@@ -4937,7 +5000,8 @@ body {
 
 
 
-.header {
+.header,
+#header-bar {
   z-index: 9999; /* was var(--z-fixed) = 1030, posts with animations could overlap */
 }
 
@@ -5282,19 +5346,6 @@ body {
 
 #sidebar-backdrop.active {
   display: block;
-}
-
-@media (max-width: 768px) {
-  .sidebar {
-    position: fixed;
-    top: 0;
-    left: 0;
-    height: 100dvh;
-    z-index: var(--z-fixed, 1030);
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    /* Push nav items below the 64px header so Feed button is always visible */
-    padding-top: 72px;
-  }
 }
 
 

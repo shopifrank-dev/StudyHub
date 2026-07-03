@@ -14,9 +14,18 @@ export const homeworkState = {
   // My assignments data
   myAssignments: [],
   myAssignmentsStats: {},
+  // Cursor pagination (infinite scroll) for "My Work"
+  myAssignmentsCursor: null,
+  myAssignmentsHasMore: false,
+  myAssignmentsLoadingMore: false,
   
   // Connections homework data
   connectionsHomework: [],
+  // Cursor pagination (infinite scroll) for "Connections"
+  connectionsCursor: null,
+  connectionsHasMore: false,
+  connectionsLoadingMore: false,
+
   streakData: {
   current_streak: 0,
   longest_streak: 0,
@@ -110,19 +119,39 @@ forceRefresh(type) {
   },
   
   /**
-   * Set my assignments
+   * Set my assignments.
+   * @param {object} data - API response `data` payload (assignments, stats, next_cursor, has_more)
+   * @param {boolean} append - true when this is an infinite-scroll "load more" page;
+   *                           false to replace the list (first page / refresh)
    */
-  setMyAssignments(data) {
-  this.myAssignments = data.assignments || [];
-  this.myAssignmentsStats = data.stats || {};
-  this.dataLoaded.myHomework = true;  // ADD THIS LINE
-},
+  setMyAssignments(data, append = false) {
+    const incoming = data.assignments || [];
+    this.myAssignments = append ? this.myAssignments.concat(incoming) : incoming;
 
-// Update setConnectionsHomework (line 83):
-setConnectionsHomework(data) {
-  this.connectionsHomework = data.homework || [];
-  this.dataLoaded.connectionsHomework = true;  // ADD THIS LINE
-},
+    // Stats reflect the full filtered set server-side, always safe to overwrite
+    if (data.stats) {
+      this.myAssignmentsStats = data.stats;
+    }
+
+    this.myAssignmentsCursor = data.next_cursor || null;
+    this.myAssignmentsHasMore = !!data.has_more;
+    this.dataLoaded.myHomework = true;
+  },
+
+  /**
+   * Set connections homework feed.
+   * @param {object} data - API response `data` payload (homework, next_cursor, has_more)
+   * @param {boolean} append - true when this is an infinite-scroll "load more" page;
+   *                           false to replace the list (first page / refresh)
+   */
+  setConnectionsHomework(data, append = false) {
+    const incoming = data.homework || [];
+    this.connectionsHomework = append ? this.connectionsHomework.concat(incoming) : incoming;
+
+    this.connectionsCursor = data.next_cursor || null;
+    this.connectionsHasMore = !!data.has_more;
+    this.dataLoaded.connectionsHomework = true;
+  },
   
   /**
    * Set loading state
@@ -210,7 +239,11 @@ getEditResources() {
    */
   reset() {
     this.myAssignments = [];
+    this.myAssignmentsCursor = null;
+    this.myAssignmentsHasMore = false;
     this.connectionsHomework = [];
+    this.connectionsCursor = null;
+    this.connectionsHasMore = false;
     this.uploadedResources = [];
     this.currentSubmission = null;
     this.currentAssignment = null;

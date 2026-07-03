@@ -400,7 +400,6 @@ class PullToRefresh {
 // ---------------------------------------------------------------------------
 
 async function initFeed() {
-  showToast("init called");
   group('initFeed');
   log('Starting...');
 
@@ -447,7 +446,6 @@ async function initFeed() {
 document.addEventListener('DOMContentLoaded', async function () {
   group('=== LearnHub Feed Initialization ===');
   log('DOMContentLoaded fired');
-  showToast("contnt loaded");
 
   try {
     // ── Pre-flight checks ──────────────────────────────────────────────────

@@ -2844,7 +2844,7 @@ No markdown, no explanation."""
 
         ai_response = _call_provider_sync(
             [{"role": "system", "content": system}, {"role": "user", "content": user_prompt}],
-            provider
+            provider, "meeting_notes"
         )
 
         clean = ai_response.strip().lstrip("```json").lstrip("```").rstrip("```").strip()

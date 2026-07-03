@@ -19,8 +19,8 @@ export const MessageHandlers = {
 
   'open-conversation': (target) => {
     events.handleOpenConversation(target);
-    const _header      = document.querySelector('header');
-    _header.classList.add('hidden');
+    const headerBar = document.getElementById('header-bar');
+    if (headerBar) headerBar.classList.add('hidden');
   },
   'audio-call': () => {
     toast('Audio call feature coming soon', 'info');

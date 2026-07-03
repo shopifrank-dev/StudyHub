@@ -3742,7 +3742,7 @@ def post_comments(current_user, post_id):
                 "resources": c.resources,
                 "is_solution": c.is_solution,
                 "post_is_solved": post_is_solved,
-                "is_author": post.student_id == r.student_id,
+                "is_author": post.student_id == c.student_id,
 
                 "depth_level": c.depth_level,
                 "is_you": comment_author.id == current_user.id,

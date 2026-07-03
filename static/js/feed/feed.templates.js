@@ -1006,13 +1006,6 @@ export function createPostCard(post) {
 
 export function createCommentCard(comment, context = 'modal') {
 
-showToast(`Debug: ${JSON.stringify({ 
-  is_you: comment.is_you,
-  text: comment.text_content,
-  is_author: comment.user_interactions?.is_author, 
-  post_is_solved: comment.post_is_solved, 
-  is_solution: comment.is_solution 
-})}`, "info");
 
   const author = comment.author || {};
   const uniqueId = `comment-card-${context}-${comment.id}`;

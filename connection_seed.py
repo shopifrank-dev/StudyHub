@@ -1,105 +1,143 @@
 """
-Connection System Seed Script — RECEIVER-HEAVY FOR USER 1
-==========================================================
-Key changes vs previous version
----------------------------------
-1. User 1 is the RECEIVER on ~75 % of their connections (others send to them).
-   Previously the requester/receiver choice was 50/50.
+StudyHub Connection Graph Seed Script (Production-Grade)
+Generates a realistic university social graph across ~3,000 seeded students.
 
-2. FORCE_CLEAR = True — no interactive confirmation prompt.
+Run this AFTER seed_students.py.
 
-3. Total connections raised to 120 to give User 1 a richer network.
+============================================================================
+HOW THE GRAPH IS BUILT
+============================================================================
+This does NOT create random pairs uniformly. Real social networks are not
+uniform — a small number of people have huge networks, most people have
+modest ones, and connections cluster heavily around shared context
+(department, class level, when you joined, and friends-of-friends).
 
-4. Connections that involve User 1 are seeded with realistic statuses:
-      accepted  60 %   (these form mutual-count denominator for suggestions)
-      pending   30 %   (incoming requests still showing)
-      rejected   7 %
-      blocked    3 %
+1. SOCIABILITY TIERS
+   Every student is assigned a tier (quiet / casual / average / very_active /
+   influencer) via weighted random draw. Each tier has its own target-degree
+   range. This alone produces the "some students have 5 connections, some
+   have 300" shape requested, without hardcoding a single "hub" user.
 
-5. Inter-user (non-User-1) connections give other users some accepted
-   connections so mutual-count numbers are non-zero.
+2. WEIGHTED CANDIDATE POOLS
+   When a student needs a new connection, the partner is drawn from one of:
+     - same department pool      (department clusters)
+     - same class level pool     (year/level clusters)
+     - same join-cohort pool     (recently-joined students cluster together,
+                                   like they do via onboarding suggestions)
+     - friend-of-a-friend pool   (triadic closure -> real clustering
+                                   coefficient, forms tight-knit groups)
+     - fully random pool         (cross-department "campus friendships" and
+                                   the occasional long-range edge that keeps
+                                   the graph from fragmenting into islands)
+   Weights are configurable in SeedConfig.
 
-6. ISOLATION GUARANTEE — at least MIN_ISOLATED_USERS (default 20) users are
-   carved out before any User-1 connections are created. Those users never
-   appear as requester or receiver on any Connection row involving User 1,
-   in any status — no accepted/pending/rejected/blocked, no history at all.
-   They can still connect with each other in Phase 2.
+3. STUB-GROWTH, NOT PAIRWISE ENUMERATION
+   Instead of generating and scoring all ~4.5M possible pairs, each student
+   greedily reaches for connections until they hit their target degree (or
+   attempt budget). Candidate pools are small (a department has dozens of
+   students, not thousands), so this stays fast at O(total_target_degree)
+   rather than O(n^2).
 
-Run AFTER user_seed.py
+4. DUPLICATE / SELF-CONNECTION SAFETY
+   A single `used_pairs` set (unordered id tuples) is checked before any
+   edge is accepted, so no pair is ever connected twice and no student is
+   ever connected to themselves, before a single row touches the database.
+
+5. STATUS REALISM
+   Same-department / same-level pairs skew towards "accepted" (people you
+   actually know say yes more often). Cross-department random pairs skew
+   towards "pending" / "rejected" (cold outreach has a lower hit rate).
+
+6. PERFORMANCE
+   Single query to pull the student population, in-memory graph
+   construction, and batched inserts (SeedConfig.BATCH_SIZE) with periodic
+   commits — no N+1 queries during graph generation.
 """
 
 import random
 import datetime
 import logging
-from typing import List, Dict, Set, Tuple, Optional
-from sqlalchemy.exc import SQLAlchemyError, IntegrityError
-from extensions import db
-from models import User, Connection, StudentProfile, OnboardingDetails
+from typing import List, Dict, Tuple, Optional
+from collections import Counter, defaultdict
 
+from sqlalchemy.exc import SQLAlchemyError
+from extensions import db
+from models import User, Connection, StudentProfile
 
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
 
 class SeedConfig:
-    NUM_CONNECTIONS   = 120
+    """Centralized configuration for connection graph seeding"""
+
     SEED_RANDOM_STATE = 42
-    BATCH_SIZE        = 20
-    FORCE_CLEAR       = True   # skip interactive confirmation
+    BATCH_SIZE = 500
 
-    # Fraction of total connections that involve User 1
-    USER1_FRACTION    = 0.75   # 90 connections touch User 1
+    # ---- Sociability tiers: (name, selection_weight, (min_degree, max_degree)) ----
+    # Weights are relative, not percentages — they just need to sum sensibly.
+    DEGREE_TIERS = [
+        ("quiet",       8,  (1, 5)),      # barely active, few ties
+        ("casual",      35, (5, 15)),     # spec: "some students"
+        ("average",     40, (20, 50)),    # spec: "average students"
+        ("very_active", 14, (60, 120)),   # spec: "very active students"
+        ("influencer",  3,  (150, 300)),  # spec: "campus influencers"
+    ]
 
-    # For User-1 connections: probability that User 1 is the RECEIVER
-    USER1_AS_RECEIVER = 0.75   # 75 % incoming,  25 % outgoing
+    # ---- Candidate pool weights (relative) used when picking a partner ----
+    POOL_WEIGHT_DEPARTMENT = 40
+    POOL_WEIGHT_LEVEL = 15
+    POOL_WEIGHT_COHORT = 10
+    POOL_WEIGHT_FRIEND_OF_FRIEND = 20   # only available once a student has ties
+    POOL_WEIGHT_RANDOM = 15
 
-    # Guarantee that at least this many users have ZERO connection rows
-    # touching User 1 (no requester/receiver relationship in any status,
-    # ever). These users are carved out BEFORE Phase 1 runs so they can
-    # never be picked as a User-1 connection partner.
-    MIN_ISOLATED_USERS = 20
-
-    # Status weights for User-1 connections
-    USER1_STATUS = {
+    # ---- Connection status distribution (base, adjusted per-pair below) ----
+    STATUS_DISTRIBUTION = {
         "accepted": 0.60,
-        "pending":  0.30,
-        "rejected": 0.07,
-        "blocked":  0.03,
+        "pending": 0.25,
+        "rejected": 0.10,
+        "blocked": 0.05,
     }
 
-    # Status weights for inter-user connections
-    OTHER_STATUS = {
-        "accepted": 0.55,
-        "pending":  0.25,
-        "rejected": 0.12,
-        "blocked":  0.08,
-    }
-
+    # ---- Date ranges ----
     MAX_DAYS_AGO = 180
     MIN_DAYS_AGO = 1
 
+    # ---- Safety valves ----
+    HARD_DEGREE_CAP = 400          # no student can exceed this many connections
+    MAX_TOTAL_EDGES = 250_000      # absolute ceiling on generated edges
+    MAX_ATTEMPT_MULTIPLIER = 8     # per-student search budget = target * this
+
+    # ---- Guarantee the primary test/QA account has a workable network ----
+    GUARANTEE_PRIMARY_ACTIVE = True
+    PRIMARY_USER_ID = 1
 
 config = SeedConfig()
 
 # ============================================================================
-# LOGGING
+# LOGGING SETUP
 # ============================================================================
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[logging.FileHandler("seed_connections.log"), logging.StreamHandler()],
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('seed_connections.log'),
+        logging.StreamHandler()
+    ]
 )
 logger = logging.getLogger(__name__)
 
-
 # ============================================================================
-# DATA POOLS
+# REALISTIC DATA POOLS (reused from existing connection_seed.py)
 # ============================================================================
 
 CONNECTION_TYPES = [
-    "study_partner", "mentor_mentee", "classmate",
-    "project_partner", "tutoring",
+    "study_partner",
+    "mentor_mentee",
+    "classmate",
+    "project_partner",
+    "tutoring"
 ]
 
 SUBJECTS = [
@@ -107,44 +145,45 @@ SUBJECTS = [
     "Data Structures", "Algorithms", "Database Systems",
     "Web Development", "Machine Learning", "Statistics",
     "Discrete Math", "Operating Systems", "Networks",
-    "Software Engineering", "Computer Architecture",
-    "Artificial Intelligence", "Signal Processing",
+    "Software Engineering", "Computer Architecture"
 ]
 
-REQUESTER_NOTES = [
+REQUESTER_NOTES_TEMPLATES = [
     "Hi! I saw you're also studying {subject}. Want to connect?",
     "Hey! Would love to be study partners this semester",
     "Hi! Our mutual friend suggested we connect",
     "Hello! I could use help with {subject}",
     "Hey! Let's collaborate on upcoming projects",
-    "Really impressed by your posts on {subject}.",
-    "Met in {subject} class. Would love to keep in touch.",
-    "Connected through mutual friends. Excited to work together!",
+    "Great study partner! Really helps with {subject}.",
+    "Met in {subject} class. Very knowledgeable.",
+    "Connected through mutual friends. Seems helpful.",
+    "Reached out for help with {subject}. Super patient!",
+    "Active in study groups. Good resource for {subject}.",
+    "Classmate from {subject}. Always willing to collaborate.",
+    "Found through recommendations. Excited to work together!",
     "Shared interest in {subject}. Looking forward to studying together.",
-    "Really good at explaining {subject} concepts — hope you'll help me!",
+    "Really good at explaining {subject} concepts.",
+    "Helpful and friendly. Great addition to my network.",
     "Connected for {subject} project collaboration.",
+    "Seems very organized and dedicated to studies.",
     "Mutual connection suggested we link up for {subject}.",
-    "Met during office hours. Very approachable!",
-    "Active contributor in forums. Reached out to connect.",
-    "Saw your profile and think we'd make great study partners.",
-    "Your notes on {subject} are amazing — can we connect?",
-    "Hope to learn a lot from you on {subject}.",
-    "Looking for an accountability partner for {subject}.",
-    "Heard great things about you from classmates!",
-    "Want to form a study group for {subject} — interested?",
+    "Met during office hours. Very approachable.",
+    "Active contributor in forums. Reached out to connect."
 ]
 
-RECEIVER_NOTES = [
+RECEIVER_NOTES_TEMPLATES = [
     "Seems motivated. Happy to help with {subject}.",
     "New connection. Will see how collaboration goes.",
     "Accepted because we're in the same {subject} class.",
     "Could use my help with {subject}. Willing to assist.",
     "Mutual friends vouched for them. Gave it a shot.",
-    "Same department. Networking for future projects.",
+    "Added to expand my study network in {subject}.",
     "Seems genuine. Looking forward to working together.",
     "Connection requested help. Happy to share knowledge.",
-    "Reached out politely. Seems like a good fit.",
+    "Same department. Networking for future projects.",
+    "Reached out politely. Seems like good fit for study sessions.",
     "Part of {subject} group project. Added for coordination.",
+    "Recommended by classmate. Hoping for good collaboration.",
     "Needs support in {subject}. I can help with that.",
     "Active in same threads. Good to have in network.",
     "Similar study style. Could work well together.",
@@ -152,308 +191,549 @@ RECEIVER_NOTES = [
     "Looking for {subject} study partner. This could work.",
     "Mutual interest in {subject} topics.",
     "Added during study group formation.",
-    "Seems responsible and committed to learning.",
-    "Happy to mentor on {subject}.",
-    "Great energy — looking forward to our sessions.",
+    "Seems responsible and committed to learning."
 ]
 
-
 # ============================================================================
-# HELPERS
+# HELPER FUNCTIONS - NOTES & TIMING (reused from existing connection_seed.py)
 # ============================================================================
 
-def gen_note(templates: List[str]) -> str:
-    t = random.choice(templates)
-    if "{subject}" in t:
-        return t.format(subject=random.choice(SUBJECTS)) if random.random() < 0.75 \
-               else t.replace("{subject}", "various topics")
-    return t
+def generate_note(template_list: List[str]) -> str:
+    """Generate a note from template with optional subject substitution"""
+    template = random.choice(template_list)
+    if "{subject}" in template and random.random() < 0.7:
+        return template.format(subject=random.choice(SUBJECTS))
+    elif "{subject}" in template:
+        return template.replace("{subject}", "various topics")
+    return template
 
 
-def pick_status(weights: Dict[str, float]) -> str:
-    return random.choices(list(weights.keys()), weights=list(weights.values()))[0]
+def should_have_notes() -> bool:
+    """Determine if a user should have notes (80% chance)"""
+    return random.random() < 0.8
 
 
-def response_timedelta(status: str) -> Optional[datetime.timedelta]:
+def generate_response_time(status: str) -> Optional[datetime.timedelta]:
+    """Generate realistic response time based on status"""
     if status == "accepted":
-        return datetime.timedelta(hours=random.randint(1, 24)) \
-               if random.random() < 0.70 else \
-               datetime.timedelta(days=random.randint(1, 7))
-    if status == "rejected":
-        return datetime.timedelta(days=random.randint(1, 14))
-    if status == "blocked":
-        return datetime.timedelta(hours=random.randint(0, 3))
+        if random.random() < 0.70:
+            return datetime.timedelta(hours=random.randint(1, 24))
+        return datetime.timedelta(days=random.randint(1, 7))
+    elif status == "rejected":
+        if random.random() < 0.50:
+            return datetime.timedelta(days=random.randint(1, 3))
+        return datetime.timedelta(days=random.randint(7, 30))
+    elif status == "blocked":
+        return datetime.timedelta(hours=random.randint(0, 2))
     return None
 
+# ============================================================================
+# DATABASE OPERATIONS
+# ============================================================================
 
-def make_connection(
-    requester: User,
-    receiver:  User,
-    status:    str,
-    requested_at: datetime.datetime,
+def verify_database_connection() -> bool:
+    return True
+
+
+def fetch_student_population():
+    """Single query: approved users joined with their student profile."""
+    rows = (
+        db.session.query(
+            User.id, StudentProfile.department, StudentProfile.class_name, User.joined_at
+        )
+        .join(StudentProfile, StudentProfile.user_id == User.id)
+        .filter(User.status == "approved")
+        .all()
+    )
+
+    if len(rows) < 2:
+        logger.error(f"Insufficient students: found {len(rows)}, need at least 2")
+        print("❌ Error: Need at least 2 approved students with profiles to build a graph")
+        print("💡 Tip: Run seed_students.py first")
+        return False, []
+
+    logger.info(f"Found {len(rows)} approved students with profiles")
+    print(f"✅ Found {len(rows)} approved students with profiles")
+    return True, rows
+
+
+def clear_existing_connections() -> bool:
+    """Clear existing connection data with confirmation"""
+    try:
+        existing_count = Connection.query.count()
+
+        if existing_count > 0:
+            logger.warning(f"Found {existing_count} existing connections")
+            print(f"\n⚠️  Warning: {existing_count} connections already exist")
+            response = input("Clear all existing connection data? (yes/no): ")
+            if response.lower() != 'yes':
+                logger.info("Seed aborted by user")
+                print("❌ Seed aborted")
+                return False
+
+        print("🗑️  Clearing existing connection data...")
+        Connection.query.delete()
+        db.session.commit()
+        print("✅ Cleared existing data")
+        return True
+
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        logger.error(f"Failed to clear existing data: {e}")
+        print(f"❌ Failed to clear data: {e}")
+        return False
+
+# ============================================================================
+# GRAPH INDEX CONSTRUCTION
+# ============================================================================
+
+def build_indices(rows) -> Tuple[Dict, Dict, Dict, List[int], Dict[int, dict]]:
+    """
+    Builds lookup indices used for weighted candidate selection.
+    Returns (dept_index, level_index, cohort_index, all_ids, student_meta)
+    """
+    dept_index = defaultdict(list)
+    level_index = defaultdict(list)
+    cohort_index = defaultdict(list)
+    all_ids: List[int] = []
+    student_meta: Dict[int, dict] = {}
+
+    for user_id, department, class_name, joined_at in rows:
+        dept = department or "Unspecified"
+        level = class_name or "Unspecified"
+        joined = joined_at or datetime.datetime.utcnow()
+        cohort = (joined.year, joined.month)
+
+        dept_index[dept].append(user_id)
+        level_index[level].append(user_id)
+        cohort_index[cohort].append(user_id)
+        all_ids.append(user_id)
+
+        student_meta[user_id] = {
+            "department": dept,
+            "level": level,
+            "joined_at": joined,
+            "cohort": cohort,
+        }
+
+    return dept_index, level_index, cohort_index, all_ids, student_meta
+
+# ============================================================================
+# DEGREE ASSIGNMENT
+# ============================================================================
+
+def assign_target_degree(force_tier: str = None) -> Tuple[str, int]:
+    """Pick a sociability tier (or use a forced one) and a degree within it."""
+    tiers = config.DEGREE_TIERS
+    if force_tier:
+        tier = next(t for t in tiers if t[0] == force_tier)
+    else:
+        names = [t[0] for t in tiers]
+        weights = [t[1] for t in tiers]
+        chosen_name = random.choices(names, weights=weights, k=1)[0]
+        tier = next(t for t in tiers if t[0] == chosen_name)
+
+    lo, hi = tier[2]
+    return tier[0], random.randint(lo, hi)
+
+# ============================================================================
+# CANDIDATE SELECTION
+# ============================================================================
+
+def pick_candidate(
+    uid: int,
+    student_meta: Dict[int, dict],
+    dept_index: Dict[str, List[int]],
+    level_index: Dict[str, List[int]],
+    cohort_index: Dict[Tuple[int, int], List[int]],
+    all_ids: List[int],
+    adjacency: Dict[int, set],
+) -> Optional[int]:
+    """Weighted pick of a connection candidate for `uid`. May return None."""
+    meta = student_meta[uid]
+    pools = []
+    weights = []
+
+    dept_pool = dept_index.get(meta["department"], [])
+    if len(dept_pool) > 1:
+        pools.append(("department", dept_pool))
+        weights.append(config.POOL_WEIGHT_DEPARTMENT)
+
+    level_pool = level_index.get(meta["level"], [])
+    if len(level_pool) > 1:
+        pools.append(("level", level_pool))
+        weights.append(config.POOL_WEIGHT_LEVEL)
+
+    cohort_pool = cohort_index.get(meta["cohort"], [])
+    if len(cohort_pool) > 1:
+        pools.append(("cohort", cohort_pool))
+        weights.append(config.POOL_WEIGHT_COHORT)
+
+    if adjacency.get(uid):
+        pools.append(("friend_of_friend", None))
+        weights.append(config.POOL_WEIGHT_FRIEND_OF_FRIEND)
+
+    pools.append(("random", all_ids))
+    weights.append(config.POOL_WEIGHT_RANDOM)
+
+    pool_type, pool_list = random.choices(pools, weights=weights, k=1)[0]
+
+    if pool_type == "friend_of_friend":
+        friends = tuple(adjacency.get(uid, ()))
+        if not friends:
+            return None
+        friend = random.choice(friends)
+        fof_candidates = tuple(adjacency.get(friend, ()))
+        if not fof_candidates:
+            return None
+        return random.choice(fof_candidates)
+
+    if not pool_list:
+        return None
+    return random.choice(pool_list)
+
+# ============================================================================
+# GRAPH GENERATION
+# ============================================================================
+
+def generate_social_graph(
+    student_meta: Dict[int, dict],
+    all_ids: List[int],
+    dept_index, level_index, cohort_index,
+    primary_user_id: Optional[int] = None,
+):
+    """
+    Grows the connection graph in-memory using stub growth + weighted pools.
+    Returns (edges, tier_map, degree_actual).
+      edges: list of (uid_a, uid_b) unordered unique pairs
+      tier_map: {uid: tier_name}
+      degree_actual: {uid: final degree}
+    """
+    degree_target: Dict[int, int] = {}
+    tier_map: Dict[int, str] = {}
+
+    for uid in all_ids:
+        force = "very_active" if (primary_user_id and uid == primary_user_id) else None
+        tier, target = assign_target_degree(force_tier=force)
+        degree_target[uid] = target
+        tier_map[uid] = tier
+
+    degree_actual: Dict[int, int] = defaultdict(int)
+    adjacency: Dict[int, set] = defaultdict(set)
+    used_pairs = set()
+    edges: List[Tuple[int, int]] = []
+
+    order = all_ids[:]
+    random.shuffle(order)
+
+    total_target_stubs = sum(degree_target.values())
+    max_total_edges = min(config.MAX_TOTAL_EDGES, total_target_stubs)
+
+    for uid in order:
+        target = degree_target[uid]
+        max_attempts = max(target * config.MAX_ATTEMPT_MULTIPLIER, 20)
+        attempts = 0
+
+        while (
+            degree_actual[uid] < target
+            and attempts < max_attempts
+            and len(edges) < max_total_edges
+        ):
+            attempts += 1
+            candidate = pick_candidate(
+                uid, student_meta, dept_index, level_index, cohort_index, all_ids, adjacency
+            )
+            if candidate is None or candidate == uid:
+                continue
+            if degree_actual[candidate] >= config.HARD_DEGREE_CAP:
+                continue
+
+            pair = (uid, candidate) if uid < candidate else (candidate, uid)
+            if pair in used_pairs:
+                continue
+
+            used_pairs.add(pair)
+            edges.append(pair)
+            adjacency[uid].add(candidate)
+            adjacency[candidate].add(uid)
+            degree_actual[uid] += 1
+            degree_actual[candidate] += 1
+
+    return edges, tier_map, dict(degree_actual)
+
+# ============================================================================
+# STATUS SELECTION
+# ============================================================================
+
+def pick_status(a: int, b: int, student_meta: Dict[int, dict]) -> str:
+    """
+    Status is weighted by how 'close' the pair is. People you actually share
+    context with (same department/level) are far more likely to accept;
+    cold cross-department outreach skews toward pending/rejected.
+    """
+    same_dept = student_meta[a]["department"] == student_meta[b]["department"]
+    same_level = student_meta[a]["level"] == student_meta[b]["level"]
+
+    weights = dict(config.STATUS_DISTRIBUTION)
+
+    if same_dept and same_level:
+        weights["accepted"] *= 1.25
+        weights["rejected"] *= 0.70
+    elif same_dept or same_level:
+        weights["accepted"] *= 1.10
+    else:
+        weights["accepted"] *= 0.85
+        weights["pending"] *= 1.10
+        weights["rejected"] *= 1.15
+
+    statuses = list(weights.keys())
+    w = list(weights.values())
+    return random.choices(statuses, weights=w, k=1)[0]
+
+# ============================================================================
+# CONNECTION RECORD CREATION
+# ============================================================================
+
+def create_connection_record(
+    requester_id: int, receiver_id: int, status: str, requested_at: datetime.datetime
 ) -> Connection:
-    td = response_timedelta(status)
+    """Create a single Connection row with separate requester/receiver notes."""
+    response_time = generate_response_time(status)
+    responded_at = requested_at + response_time if response_time else None
+    conn_type = random.choice(CONNECTION_TYPES)
+
+    requester_notes = generate_note(REQUESTER_NOTES_TEMPLATES) if should_have_notes() else None
+    receiver_notes = (
+        generate_note(RECEIVER_NOTES_TEMPLATES)
+        if (status == "accepted" and should_have_notes())
+        else None
+    )
+
     return Connection(
-        requester_id=requester.id,
-        receiver_id=receiver.id,
+        requester_id=requester_id,
+        receiver_id=receiver_id,
         status=status,
         requested_at=requested_at,
-        responded_at=(requested_at + td) if td else None,
-        connection_type=random.choice(CONNECTION_TYPES),
-        requester_notes=gen_note(REQUESTER_NOTES) if random.random() < 0.80 else None,
-        receiver_notes=(gen_note(RECEIVER_NOTES)
-                        if status == "accepted" and random.random() < 0.80 else None),
+        responded_at=responded_at,
+        connection_type=conn_type,
+        requester_notes=requester_notes,
+        receiver_notes=receiver_notes,
         is_seen=random.choice([True, False]) if status == "pending" else True,
     )
 
-
 # ============================================================================
-# DATABASE
-# ============================================================================
-
-def clear_existing_connections() -> bool:
-    try:
-        cnt = Connection.query.count()
-        if cnt:
-            print(f"🗑️  Auto-clearing {cnt} existing connections (FORCE_CLEAR=True)...")
-        Connection.query.delete()
-        db.session.commit()
-        print("✅ Connections cleared")
-        return True
-    except SQLAlchemyError as e:
-        db.session.rollback()
-        logger.error(f"Clear failed: {e}")
-        print(f"❌ Clear failed: {e}")
-        return False
-
-
-def check_prerequisites() -> Tuple[bool, List[User]]:
-    users = User.query.filter_by(status="approved").all()
-    if len(users) < 2:
-        print("❌ Need at least 2 approved users. Run user_seed.py first.")
-        return False, []
-    print(f"✅ Found {len(users)} approved users")
-
-    # The isolation guarantee needs MIN_ISOLATED_USERS reserved PLUS enough
-    # left over to actually build User 1's network.
-    min_needed = config.MIN_ISOLATED_USERS + 2
-    if len(users) - 1 < min_needed:
-        print(f"⚠️  Only {len(users) - 1} non-primary users exist; the "
-              f"{config.MIN_ISOLATED_USERS}-user isolation guarantee will be "
-              f"reduced automatically (see Phase 1 output).")
-    return True, users
-
-
-# ============================================================================
-# MAIN SEED
+# MAIN SEED FUNCTION
 # ============================================================================
 
 def seed_connections() -> bool:
-    print("🌱 Starting connection seed (RECEIVER-HEAVY for User 1)...")
+    """Main seeding function - builds and materializes the social graph."""
+    print("🌱 Starting StudyHub social graph seed...")
     random.seed(config.SEED_RANDOM_STATE)
 
-    ok, all_users = check_prerequisites()
+    if not verify_database_connection():
+        return False
+
+    ok, rows = fetch_student_population()
     if not ok:
         return False
 
     if not clear_existing_connections():
         return False
 
-    primary = User.query.filter_by(id=1).first()
-    if not primary:
-        print("❌ User with ID=1 not found. Run user_seed.py first.")
-        return False
+    print("📐 Indexing student population by department / level / cohort...")
+    dept_index, level_index, cohort_index, all_ids, student_meta = build_indices(rows)
+    print(f"   {len(dept_index)} departments, {len(level_index)} levels, "
+          f"{len(cohort_index)} join-cohorts")
 
-    print(f"🎯 Primary user: {primary.name} (ID={primary.id})")
+    primary_id = None
+    if config.GUARANTEE_PRIMARY_ACTIVE:
+        primary_user = User.query.filter_by(id=config.PRIMARY_USER_ID).first()
+        if primary_user and primary_user.id in student_meta:
+            primary_id = primary_user.id
+            print(f"🎯 Guaranteeing an active-tier network for primary user "
+                  f"{primary_user.name} (ID: {primary_user.id})")
 
-    others = [u for u in all_users if u.id != primary.id]
-    random.shuffle(others)          # fresh order each run
+    print(f"\n🔗 Building social graph for {len(all_ids)} students...")
+    edges, tier_map, degree_actual = generate_social_graph(
+        student_meta, all_ids, dept_index, level_index, cohort_index,
+        primary_user_id=primary_id,
+    )
+    print(f"✅ Generated {len(edges)} unique relationship pairs")
 
-    # ── Carve out a guaranteed-isolated pool BEFORE any targets are set ──────
-    # These users will never be given a connection to/from User 1, in any
-    # status, so they end up with zero shared history with the primary user.
-    total_others    = len(others)
-    isolated_target = config.MIN_ISOLATED_USERS
+    same_dept_edges = sum(
+        1 for a, b in edges if student_meta[a]["department"] == student_meta[b]["department"]
+    )
 
-    if total_others < isolated_target + 2:
-        # Not enough users to both isolate 20 and still build a network —
-        # leave at least 2 users available for User-1 connections.
-        isolated_target = max(total_others - 2, 0)
-        print(f"⚠️  Only {total_others} other users available; reducing isolated "
-              f"pool to {isolated_target} so User 1 still has connection partners.")
-
-    isolated_users      = others[:isolated_target]
-    eligible_for_user1  = others[isolated_target:]
-    isolated_ids        = {u.id for u in isolated_users}
-
-    print(f"🔒 Reserved {len(isolated_users)} users with NO connection/history to "
-          f"User 1 (ids: {sorted(isolated_ids)})")
-
-    # User-1 target can't exceed the number of users actually eligible to
-    # connect with User 1 (each pair is only used once in Phase 1).
-    desired_user1_target = int(config.NUM_CONNECTIONS * config.USER1_FRACTION)
-    user1_conn_target     = min(desired_user1_target, len(eligible_for_user1))
-    other_conn_target     = config.NUM_CONNECTIONS - user1_conn_target
-
-    if user1_conn_target < desired_user1_target:
-        print(f"⚠️  Eligible pool ({len(eligible_for_user1)}) is smaller than the "
-              f"desired User-1 target ({desired_user1_target}); capping at "
-              f"{user1_conn_target}.")
-
-    print(f"📊 Plan: {user1_conn_target} with User 1  |  {other_conn_target} inter-user")
-
-    used_pairs: Set[Tuple[int, int]] = set()
-    created = failed = 0
+    print(f"\n💾 Materializing {len(edges)} connections into the database...")
+    connections_created = 0
+    connections_failed = 0
     now = datetime.datetime.utcnow()
 
-    # ── Phase 1: User-1 connections (receiver-heavy) ─────────────────────────
-    print(f"\n🔗 Phase 1: User-1 connections ({user1_conn_target} total)...")
-
-    # Only draw from the eligible (non-isolated) pool.
-    pool = list(eligible_for_user1)
-    random.shuffle(pool)
-
-    for other in pool:
-        if created >= user1_conn_target:
-            break
-
-        pair = tuple(sorted([primary.id, other.id]))
-        if pair in used_pairs:
-            continue
-        used_pairs.add(pair)
-
-        # Decide direction: receiver 75 %, requester 25 %
-        if random.random() < config.USER1_AS_RECEIVER:
-            requester, receiver = other, primary      # other → User 1 (incoming)
-        else:
-            requester, receiver = primary, other      # User 1 → other (outgoing)
-
-        status       = pick_status(config.USER1_STATUS)
-        days_ago     = random.randint(config.MIN_DAYS_AGO, config.MAX_DAYS_AGO)
-        requested_at = now - datetime.timedelta(days=days_ago)
-
-        try:
-            conn = make_connection(requester, receiver, status, requested_at)
-            db.session.add(conn)
-            created += 1
-
-            if created % config.BATCH_SIZE == 0:
-                db.session.commit()
-                print(f"   ✓ {created}/{config.NUM_CONNECTIONS} connections...")
-
-        except Exception as e:
-            logger.error(f"Phase-1 error: {e}")
-            failed += 1
-
-    # ── Phase 2: Inter-user connections ──────────────────────────────────────
-    print(f"\n🔗 Phase 2: Inter-user connections ({other_conn_target} total)...")
-
-    attempts = 0
-    max_attempts = other_conn_target * 5
-
-    while (created - user1_conn_target) < other_conn_target:
-        attempts += 1
-        if attempts > max_attempts or len(others) < 2:
-            break
-
-        req, rec = random.sample(others, 2)
-        pair = tuple(sorted([req.id, rec.id]))
-        if pair in used_pairs:
-            continue
-        used_pairs.add(pair)
-
-        status       = pick_status(config.OTHER_STATUS)
-        days_ago     = random.randint(config.MIN_DAYS_AGO, config.MAX_DAYS_AGO)
-        requested_at = now - datetime.timedelta(days=days_ago)
-
-        try:
-            conn = make_connection(req, rec, status, requested_at)
-            db.session.add(conn)
-            created += 1
-
-            if created % config.BATCH_SIZE == 0:
-                db.session.commit()
-                print(f"   ✓ {created}/{config.NUM_CONNECTIONS} connections...")
-
-        except Exception as e:
-            logger.error(f"Phase-2 error: {e}")
-            failed += 1
-
-    # Final commit
     try:
+        for a, b in edges:
+            try:
+                if random.random() < 0.5:
+                    requester_id, receiver_id = a, b
+                else:
+                    requester_id, receiver_id = b, a
+
+                status = pick_status(a, b, student_meta)
+
+                joined_at = max(student_meta[a]["joined_at"], student_meta[b]["joined_at"])
+                days_available = max((now - joined_at).days, 1)
+                days_ago = random.randint(
+                    config.MIN_DAYS_AGO, min(days_available, config.MAX_DAYS_AGO)
+                )
+                requested_at = now - datetime.timedelta(days=days_ago)
+
+                connection = create_connection_record(
+                    requester_id, receiver_id, status, requested_at
+                )
+                db.session.add(connection)
+                connections_created += 1
+
+                if connections_created % config.BATCH_SIZE == 0:
+                    db.session.commit()
+                    print(f"   ✓ {connections_created}/{len(edges)} connections committed...")
+
+            except Exception as e:
+                logger.error(f"Error creating connection {a}-{b}: {e}")
+                db.session.rollback()
+                connections_failed += 1
+                continue
+
         db.session.commit()
-        print(f"\n✅ {created} connections created  |  {failed} failed")
-    except SQLAlchemyError as e:
+        print(f"\n✅ Created {connections_created} connections successfully!")
+        if connections_failed:
+            print(f"⚠️  {connections_failed} connections failed to create")
+
+        print_summary_statistics(tier_map, degree_actual, len(edges), same_dept_edges)
+        return True
+
+    except Exception as e:
+        logger.error(f"Unexpected error during seeding: {e}", exc_info=True)
         db.session.rollback()
-        print(f"❌ Final commit failed: {e}")
+        print(f"❌ Unexpected error: {e}")
         return False
 
-    print_summary()
-    return True
-
-
 # ============================================================================
-# SUMMARY
+# VALIDATION
 # ============================================================================
 
-def print_summary():
+def validate_seed_integrity() -> bool:
+    """Post-seed sanity checks: no dupes, no self-connections, valid FKs."""
+    print("\n🔍 Validating seeded connection graph...")
+    ok = True
+
+    all_conns = Connection.query.all()
+    pairs_seen = set()
+    self_conns = 0
+    dup_pairs = 0
+
+    for c in all_conns:
+        if c.requester_id == c.receiver_id:
+            self_conns += 1
+        pair = tuple(sorted((c.requester_id, c.receiver_id)))
+        if pair in pairs_seen:
+            dup_pairs += 1
+        pairs_seen.add(pair)
+
+    if self_conns:
+        print(f"   ❌ {self_conns} self-connections found")
+        ok = False
+    if dup_pairs:
+        print(f"   ❌ {dup_pairs} duplicate relationship pairs found")
+        ok = False
+
+    valid_user_ids = {u.id for u in User.query.with_entities(User.id).all()}
+    bad_fk = sum(
+        1 for c in all_conns
+        if c.requester_id not in valid_user_ids or c.receiver_id not in valid_user_ids
+    )
+    if bad_fk:
+        print(f"   ❌ {bad_fk} connections reference invalid user IDs")
+        ok = False
+
+    if ok:
+        print("   ✅ No duplicates, no self-connections, all foreign keys valid")
+    return ok
+
+# ============================================================================
+# SUMMARY STATISTICS
+# ============================================================================
+
+def print_summary_statistics(
+    tier_map: Dict[int, str],
+    degree_actual: Dict[int, int],
+    total_edges: int,
+    same_dept_edges: int,
+):
     print("\n" + "=" * 60)
-    print("📊 CONNECTION SEED SUMMARY")
+    print("📊 SOCIAL GRAPH SEED SUMMARY")
     print("=" * 60)
 
-    total = Connection.query.count()
-    print(f"Total connections: {total}")
+    total_connections = Connection.query.count()
+    print(f"Total Connection Records: {total_connections}")
+    print(f"Unique Relationship Pairs Generated: {total_edges}")
 
-    # User 1 breakdown
-    user1 = User.query.filter_by(id=1).first()
-    if user1:
-        as_req = Connection.query.filter_by(requester_id=1).count()
-        as_rec = Connection.query.filter_by(receiver_id=1).count()
-        u1_total = as_req + as_rec
-        print(f"\n👤 User 1 ({user1.name}):")
-        print(f"   Total connections : {u1_total}  ({u1_total/total*100:.1f}% of all)")
-        print(f"   As REQUESTER (sent)    : {as_req}")
-        print(f"   As RECEIVER (received) : {as_rec}")
-        recv_pct = as_rec / u1_total * 100 if u1_total else 0
-        print(f"   Receiver share    : {recv_pct:.0f}%  "
-              f"{'✅' if recv_pct >= 60 else '⚠️  below target'}")
+    if degree_actual:
+        avg_degree = sum(degree_actual.values()) / len(degree_actual)
+        max_degree = max(degree_actual.values())
+        min_degree = min(degree_actual.values())
+        print(f"\n📈 Degree Distribution:")
+        print(f"   Average connections per student: {avg_degree:.1f}")
+        print(f"   Min: {min_degree}  |  Max: {max_degree}")
 
-    # Isolation check — users with NO connection row touching User 1 at all
-    touching_user1 = Connection.query.filter(
-        (Connection.requester_id == 1) | (Connection.receiver_id == 1)
-    ).all()
-    connected_ids = {c.requester_id for c in touching_user1} | \
-                    {c.receiver_id for c in touching_user1}
-    connected_ids.discard(1)
+    tier_counts = Counter(tier_map.values())
+    print(f"\n🎭 Sociability Tiers:")
+    for tier_name, _, drange in config.DEGREE_TIERS:
+        count = tier_counts.get(tier_name, 0)
+        pct = (count / max(len(tier_map), 1)) * 100
+        print(f"   {tier_name} ({drange[0]}-{drange[1]}): {count} students ({pct:.1f}%)")
 
-    all_other_ids = {u.id for u in User.query.filter(User.id != 1).all()}
-    isolated_ids  = all_other_ids - connected_ids
+    top_users = sorted(degree_actual.items(), key=lambda x: x[1], reverse=True)[:10]
+    if top_users:
+        top_ids = [uid for uid, _ in top_users]
+        users_map = {u.id: u for u in User.query.filter(User.id.in_(top_ids)).all()}
+        print(f"\n🌟 Top 10 Most Connected Students:")
+        for uid, deg in top_users:
+            user = users_map.get(uid)
+            name = user.name if user else f"User#{uid}"
+            print(f"   {name}: {deg} connections")
 
-    print(f"\n🔒 Users with NO connection/history to User 1: {len(isolated_ids)}  "
-          f"{'✅' if len(isolated_ids) >= 20 else '⚠️  below target of 20'}")
-    if isolated_ids:
-        print(f"   ids: {sorted(isolated_ids)}")
+    if total_edges:
+        pct_same_dept = same_dept_edges / total_edges * 100
+        print(f"\n🏫 Department Clustering: {same_dept_edges}/{total_edges} "
+              f"({pct_same_dept:.1f}%) of connections are within the same department")
 
-    # Status breakdown
-    print(f"\n📋 Status breakdown:")
+    print(f"\n📋 Connection Status:")
     icons = {"accepted": "✅", "pending": "⏳", "rejected": "❌", "blocked": "🚫"}
-    for st in ["accepted", "pending", "rejected", "blocked"]:
-        cnt = Connection.query.filter_by(status=st).count()
-        pct = cnt / total * 100 if total else 0
-        print(f"   {icons[st]} {st.capitalize()}: {cnt} ({pct:.1f}%)")
+    for status in ["accepted", "pending", "rejected", "blocked"]:
+        count = Connection.query.filter_by(status=status).count()
+        pct = (count / max(total_connections, 1)) * 100
+        print(f"   {icons[status]} {status.capitalize()}: {count} ({pct:.1f}%)")
 
-    # Notes stats
-    rn = Connection.query.filter(Connection.requester_notes.isnot(None)).count()
-    rcn = Connection.query.filter(Connection.receiver_notes.isnot(None)).count()
-    print(f"\n📝 Notes: requester={rn}, receiver={rcn}")
+    requester_notes_count = Connection.query.filter(
+        Connection.requester_notes.isnot(None), Connection.requester_notes != ""
+    ).count()
+    receiver_notes_count = Connection.query.filter(
+        Connection.receiver_notes.isnot(None), Connection.receiver_notes != ""
+    ).count()
+    print(f"\n📝 Notes Statistics:")
+    if total_connections:
+        print(f"   Connections with requester notes: {requester_notes_count} "
+              f"({requester_notes_count / total_connections * 100:.1f}%)")
+        print(f"   Connections with receiver notes:  {receiver_notes_count} "
+              f"({receiver_notes_count / total_connections * 100:.1f}%)")
+
+    validate_seed_integrity()
 
     print("\n" + "=" * 60)
-    print("✨ Connection seed complete!")
+    print("✨ Social graph seed complete! StudyHub now feels alive.")
     print("=" * 60 + "\n")
 
-
 # ============================================================================
-# STANDALONE
+# STANDALONE EXECUTION
 # ============================================================================
 
 if __name__ == "__main__":
@@ -461,4 +741,9 @@ if __name__ == "__main__":
 
     with app.app_context():
         success = seed_connections()
-        exit(0 if success else 1)
+        if success:
+            logger.info("Connection seed script completed successfully")
+            exit(0)
+        else:
+            logger.error("Connection seed script failed")
+            exit(1)

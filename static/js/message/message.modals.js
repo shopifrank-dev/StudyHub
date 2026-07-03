@@ -229,7 +229,7 @@ let _onConfirmCallback = null;
 /**
  * @param {{ title, message, confirmLabel, confirmClass, onConfirm }} opts
  */
-export function openConfirmModal({ title, message, confirmLabel = 'Confirm', confirmClass = 'bg-indigo-600 hover:bg-indigo-700', onConfirm }) {
+export function openConfirmModal({ title, message, confirmLabel = 'Confirm', confirmClass = 'bg-[var(--accent)] hover:bg-[var(--accent-hover)]', onConfirm }) {
   const modal        = document.getElementById('msg-confirm-modal');
   const titleEl      = document.getElementById('msg-confirm-title');
   const msgEl        = document.getElementById('msg-confirm-message');

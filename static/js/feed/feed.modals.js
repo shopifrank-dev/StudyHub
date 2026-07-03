@@ -824,7 +824,6 @@ export async function refinePost(postId) {
   } catch (error) {
     console.error("Refine post error:", error);
     if (typeof showToast === 'function') {
-      showToast("Error initiating refinement: " + error.message, "error");
     }
   }
 }

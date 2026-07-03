@@ -1913,6 +1913,7 @@ export async function sendConnectionRequest(userId, message = null, button = nul
         if (button) {
           button.textContent = 'Request Sent';
         }
+        showToast("Request sent");
         
         // Move to sent tab
         const card = button?.closest('.connection-card');
@@ -1943,7 +1944,6 @@ export async function sendConnectionRequest(userId, message = null, button = nul
       return response;
     }
   } catch (error) {
-    console.error('Send connection request error:', error);
     
     
     // Restore button state
@@ -1952,7 +1952,7 @@ export async function sendConnectionRequest(userId, message = null, button = nul
       button.textContent = originalText;
     }
     
-    throw error;
+  
   }
 }
 

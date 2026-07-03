@@ -178,8 +178,8 @@ export function updatePartnerStatus(partnerId, isOnline) {
 
   if (statusText) statusText.textContent = isOnline ? 'Online' : 'Offline';
   if (statusDot) {
-    statusDot.classList.toggle('bg-emerald-500', isOnline);
-    statusDot.classList.toggle('bg-gray-300', !isOnline);
+    statusDot.classList.toggle('bg-[var(--success)]', isOnline);
+    statusDot.classList.toggle('bg-[var(--text-tertiary)]', !isOnline);
   }
 }
 

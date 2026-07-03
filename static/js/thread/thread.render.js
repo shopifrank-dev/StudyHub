@@ -66,11 +66,11 @@ export function renderThreadList(state) {
 
   if (state === 'loading') {
     const skeleton = `
-      <div class="flex items-center gap-3 px-4 py-3 animate-pulse border-b border-gray-50">
-        <div class="w-12 h-12 rounded-full bg-gray-200 flex-shrink-0"></div>
+      <div class="flex items-center gap-3 px-4 py-3 animate-pulse border-b border-line-light">
+        <div class="w-12 h-12 rounded-full bg-surface-hover flex-shrink-0"></div>
         <div class="flex-1 space-y-2">
-          <div class="h-3.5 bg-gray-200 rounded-full w-2/3"></div>
-          <div class="h-3 bg-gray-100 rounded-full w-5/6"></div>
+          <div class="h-3.5 bg-surface-hover rounded-full w-2/3"></div>
+          <div class="h-3 bg-surface-raised rounded-full w-5/6"></div>
         </div>
       </div>`;
     container.innerHTML = skeleton.repeat(5);
@@ -81,9 +81,9 @@ export function renderThreadList(state) {
     container.innerHTML = `
       <div class="flex flex-col items-center gap-2 py-12 px-4">
         <span class="text-2xl">⚠️</span>
-        <p class="text-sm text-gray-500 text-center">Failed to load threads.</p>
+        <p class="text-sm text-ink-secondary text-center">Failed to load threads.</p>
         <button data-action="reload-threads"
-                class="text-sm text-indigo-600 font-semibold hover:underline">
+                class="text-sm text-accent font-semibold hover:underline">
           Retry
         </button>
       </div>`;
@@ -98,9 +98,9 @@ export function renderThreadList(state) {
     container.innerHTML = `
       <div class="flex flex-col items-center gap-3 py-16 px-4 text-center">
         <span class="text-4xl">💬</span>
-        <p class="text-sm text-gray-500">No threads yet.</p>
+        <p class="text-sm text-ink-secondary">No threads yet.</p>
         <button data-action="open-create-thread-modal"
-                class="text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700
+                class="text-sm font-semibold text-white bg-accent hover:bg-accent-hover
                        active:scale-95 rounded-xl px-4 py-2 transition-all">
           Create a Thread
         </button>
@@ -184,13 +184,13 @@ export function renderThreadHeader(thread, userStatus) {
   const avatarHtml = thread.avatar
     ? `<img src="${_escAttr(thread.avatar)}"
             class="w-9 h-9 rounded-full object-cover flex-shrink-0" alt="${_esc(thread.title)}">`
-    : `<div class="w-9 h-9 rounded-full bg-indigo-100 text-indigo-700 text-sm font-bold
+    : `<div class="w-9 h-9 rounded-full bg-accent-subtle text-accent text-sm font-bold
                    flex items-center justify-center flex-shrink-0 select-none">
          ${_esc(thread.title.charAt(0).toUpperCase())}
        </div>`;
 
   const closedBadge = !thread.is_open
-    ? `<span class="text-[10px] font-semibold text-red-500 bg-red-50 rounded px-1.5 py-0.5 ml-1">
+    ? `<span class="text-[10px] font-semibold text-red-400 bg-red-500/10 rounded px-1.5 py-0.5 ml-1">
          Closed
        </span>`
     : '';
@@ -199,10 +199,10 @@ export function renderThreadHeader(thread, userStatus) {
     <div class="flex items-center gap-2 min-w-0 flex-1">
       ${avatarHtml}
       <div class="min-w-0">
-        <h2 class="text-sm font-bold text-gray-900 truncate leading-tight">
+        <h2 class="text-sm font-bold text-ink-primary truncate leading-tight">
           ${_esc(thread.title)}${closedBadge}
         </h2>
-        <p class="text-xs text-gray-400 leading-tight">
+        <p class="text-xs text-ink-tertiary leading-tight">
           ${thread.member_count} member${thread.member_count !== 1 ? 's' : ''}
         </p>
       </div>
@@ -210,26 +210,26 @@ export function renderThreadHeader(thread, userStatus) {
 
     <div class="flex items-center gap-0.5 flex-shrink-0">
       <button data-action="thread-meeting-notes" title="AI Meeting Notes"
-              class="w-9 h-9 rounded-full flex items-center justify-center text-gray-400
-                     hover:text-emerald-600 hover:bg-emerald-50 active:bg-emerald-100
+              class="w-9 h-9 rounded-full flex items-center justify-center text-ink-tertiary
+                     hover:text-emerald-400 hover:bg-emerald-500/10 active:bg-emerald-500/15
                      transition-colors text-base">
         📋
       </button>
       <button data-action="thread-search" title="Search"
-              class="w-9 h-9 rounded-full flex items-center justify-center text-gray-400
-                     hover:text-indigo-600 hover:bg-indigo-50 active:bg-indigo-100 transition-colors">
+              class="w-9 h-9 rounded-full flex items-center justify-center text-ink-tertiary
+                     hover:text-accent hover:bg-accent-subtle active:bg-accent-subtle transition-colors">
         <svg width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
           <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
         </svg>
       </button>
       <button data-action="thread-open-pinned-list" title="Pinned"
-              class="w-9 h-9 rounded-full flex items-center justify-center text-gray-400
-                     hover:text-amber-500 hover:bg-amber-50 active:bg-amber-100 transition-colors text-base">
+              class="w-9 h-9 rounded-full flex items-center justify-center text-ink-tertiary
+                     hover:text-amber-400 hover:bg-amber-500/10 active:bg-amber-500/15 transition-colors text-base">
         📌
       </button>
       <button data-action="thread-info" title="Thread info"
-              class="w-9 h-9 rounded-full flex items-center justify-center text-gray-400
-                     hover:text-indigo-600 hover:bg-indigo-50 active:bg-indigo-100 transition-colors">
+              class="w-9 h-9 rounded-full flex items-center justify-center text-ink-tertiary
+                     hover:text-accent hover:bg-accent-subtle active:bg-accent-subtle transition-colors">
         <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
           <circle cx="12" cy="12" r="10"/>
           <line x1="12" y1="16" x2="12" y2="12"/>
@@ -254,7 +254,7 @@ export function renderMessages(messages) {
     container.insertAdjacentHTML('beforeend', `
       <div class="flex flex-col items-center justify-center h-full gap-2 py-16">
         <span class="text-3xl">👋</span>
-        <p class="text-sm text-gray-400">No messages yet. Say hello!</p>
+        <p class="text-sm text-ink-tertiary">No messages yet. Say hello!</p>
       </div>`);
     return;
   }
@@ -326,8 +326,8 @@ export function confirmOptimisticMessage(clientTempId, serverData) {
       const posClass = isMine ? 'left-0 -translate-x-full' : 'right-0 translate-x-full';
       bubbleCol.insertAdjacentHTML('afterbegin', `
         <button class="msg-options-btn absolute ${posClass} top-0
-                       w-7 h-7 rounded-full bg-white shadow-sm border border-gray-200
-                       text-gray-500 hover:text-indigo-600 hover:border-indigo-300
+                       w-7 h-7 rounded-full bg-surface-card shadow-sm border border-line
+                       text-ink-secondary hover:text-accent hover:border-accent-border
                        flex items-center justify-center text-xs select-none"
                 data-action="thread-open-options"
                 data-message-id="${serverData.id}"
@@ -363,7 +363,7 @@ export function markMessageFailed(clientTempId) {
   if (!el.querySelector("[data-action='thread-retry']")) {
     const meta = el.querySelector('.msg-meta');
     meta?.insertAdjacentHTML('beforeend', `
-      <button class="msg-retry-btn text-xs text-red-500 hover:text-red-700
+      <button class="msg-retry-btn text-xs text-red-400 hover:text-red-300
                      underline transition-colors"
               data-action="thread-retry"
               data-temp-id="${clientTempId}">
@@ -454,8 +454,8 @@ export function renderReactionUpdate(messageId, reactions) {
     const mine = Array.isArray(r.users) && r.users.includes(currentUserId);
     return `<button class="reaction-pill flex items-center gap-1 text-xs rounded-full px-2 py-0.5
                      transition-colors ${mine
-                       ? 'bg-indigo-100 text-indigo-700 ring-1 ring-indigo-300'
-                       : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
+                       ? 'bg-accent-subtle text-accent ring-1 ring-accent-border'
+                       : 'bg-surface-raised text-ink-secondary hover:bg-surface-hover'}"
                data-action="thread-react"
                data-message-id="${messageId}"
                data-emoji="${_escAttr(r.emoji)}">
@@ -556,8 +556,8 @@ export function showLearnoraBotTyping(personalityName = 'Learnora') {
         <span class="text-xs">🤖</span>
       </div>
       <div class="flex flex-col">
-        <span class="text-[10px] text-violet-600 font-semibold mb-0.5">${_esc(personalityName)}</span>
-        <div class="flex items-center gap-0.5 bg-gray-100 rounded-full px-3 py-1.5">
+        <span class="text-[10px] text-violet-300 font-semibold mb-0.5">${_esc(personalityName)}</span>
+        <div class="flex items-center gap-0.5 bg-surface-raised rounded-full px-3 py-1.5">
           <span class="w-1.5 h-1.5 bg-violet-400 rounded-full animate-bounce"
                 style="animation-delay:0ms"></span>
           <span class="w-1.5 h-1.5 bg-violet-400 rounded-full animate-bounce"
@@ -614,7 +614,7 @@ export function renderSearchResults(results, query) {
   if (!results.length) {
     container.innerHTML = `
       <div class="py-12 text-center">
-        <p class="text-sm text-gray-400">No results for "<em>${_esc(query)}</em>"</p>
+        <p class="text-sm text-ink-tertiary">No results for "<em>${_esc(query)}</em>"</p>
       </div>`;
     return;
   }
@@ -626,7 +626,7 @@ export function clearSearchResults() {
                  ?? document.querySelector("[data-role='thread-search-results']");
   if (container) {
     container.innerHTML = `
-      <div class="py-12 text-center text-sm text-gray-400">
+      <div class="py-12 text-center text-sm text-ink-tertiary">
         Start typing to search messages…
       </div>`;
   }
@@ -728,17 +728,17 @@ export function renderReplyPreview(context) {
   const container = document.getElementById('thread-reply-preview');
   if (!container) return;
   container.innerHTML = `
-    <div class="flex items-center gap-2 bg-indigo-50 border-l-2 border-indigo-400
+    <div class="flex items-center gap-2 bg-accent-subtle border-l-2 border-accent-border
                 rounded-r-lg px-3 py-2 mx-3 mb-1">
       <div class="flex-1 min-w-0">
-        <span class="block text-xs font-semibold text-indigo-700">${_esc(context.sender)}</span>
-        <span class="block text-xs text-gray-500 truncate">
+        <span class="block text-xs font-semibold text-accent">${_esc(context.sender)}</span>
+        <span class="block text-xs text-ink-secondary truncate">
           ${_esc((context.text ?? '').slice(0, 80))}
         </span>
       </div>
       <button data-action="thread-cancel-reply" aria-label="Cancel reply"
-              class="flex-shrink-0 w-6 h-6 rounded-full text-gray-400 hover:text-gray-600
-                     hover:bg-gray-200 flex items-center justify-center text-xs transition-colors">
+              class="flex-shrink-0 w-6 h-6 rounded-full text-ink-tertiary hover:text-ink-secondary
+                     hover:bg-surface-hover flex items-center justify-center text-xs transition-colors">
         ✕
       </button>
     </div>`;

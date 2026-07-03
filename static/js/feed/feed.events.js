@@ -265,7 +265,6 @@ export function showCommentResource(url, type) {
 export async function askLearnora(postId, question = '') {
   const modal = document.getElementById('ask-learnora-modal');
   if (!modal) {
-    showToast('Ask Learnora modal not found');
     return;
   }
 
@@ -658,8 +657,7 @@ export async function handleViewTagPosts(tag) {
     return;
   }
   openModal("tag-posts-modal");
-  const _header      = document.querySelector('header');
-  _header.classList.add('hidden');
+  
 
   if (title) title.textContent = `Posts tagged #${tag}`;
   

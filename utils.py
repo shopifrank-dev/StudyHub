@@ -17,7 +17,6 @@ from flask_mail import Message
 from sqlalchemy import or_, and_
 
 # Local imports
-import set_env
 from extensions import mail
 from models import Connection, User
 

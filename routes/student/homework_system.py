@@ -8,6 +8,7 @@ Features:
 - Browse available homework from all connections
 - Complete workflow: request → solution → feedback → completion
 - Smart prioritization and suggestions
+- Cursor-based pagination for "My Work" and "Connections" feeds
 """
 
 from flask import Blueprint, request, jsonify, current_app
@@ -25,6 +26,53 @@ from routes.student.helpers import (
 from utils import get_user_online_status
 
 homework_bp = Blueprint("student_homework", __name__)
+
+# Default / max page size for cursor-paginated homework endpoints
+DEFAULT_PAGE_SIZE = 15
+MAX_PAGE_SIZE = 50
+
+
+def _parse_pagination_params():
+    """
+    Parse `limit` and `cursor` query params shared by paginated homework endpoints.
+
+    `cursor` is simply the id of the last item the client has already loaded.
+    Because the full (already-sorted) list is available server-side for the
+    current request, we can find that id's position and resume from there —
+    this behaves like keyset pagination without needing a stored offset.
+    """
+    try:
+        limit = int(request.args.get("limit", DEFAULT_PAGE_SIZE))
+    except (TypeError, ValueError):
+        limit = DEFAULT_PAGE_SIZE
+    limit = max(1, min(limit, MAX_PAGE_SIZE))
+
+    cursor = request.args.get("cursor")
+    return limit, cursor
+
+
+def _slice_by_cursor(items, cursor, limit):
+    """
+    Given a fully sorted list of ORM objects (each with an `.id`), return:
+      (page, has_more, next_cursor)
+    """
+    start_index = 0
+    if cursor:
+        try:
+            cursor_id = int(cursor)
+            for i, item in enumerate(items):
+                if item.id == cursor_id:
+                    start_index = i + 1
+                    break
+        except (TypeError, ValueError):
+            start_index = 0
+
+    page = items[start_index:start_index + limit]
+    has_more = (start_index + limit) < len(items)
+    next_cursor = str(page[-1].id) if page and has_more else None
+
+    return page, has_more, next_cursor
+
 
 def _update_help_streak(helper_user_id):
     """
@@ -425,12 +473,16 @@ def get_current_champions(current_user):
 @token_required
 def get_my_assignments(current_user):
     """
-    Get all assignments for current user with smart sorting
-    
+    Get all assignments for current user with smart sorting.
+    Supports cursor-based (infinite scroll) pagination.
+
     Query params:
     - status: active, completed, all (default: active)
     - subject: Filter by subject
     - sort: priority, due_date, created_at (default: priority)
+    - limit: page size, default 15, max 50
+    - cursor: id of the last assignment already loaded by the client
+              (omit / null for the first page)
     """
     try:
         # Base query - only user's own assignments
@@ -448,7 +500,8 @@ def get_my_assignments(current_user):
         if subject:
             query = query.filter_by(subject=subject)
         
-        # Get all assignments
+        # Get the FULL matching set — needed for accurate stats/suggestions
+        # and for deterministic sorting (priority score depends on "now").
         assignments = query.all()
         
         # Recalculate priorities
@@ -464,10 +517,14 @@ def get_my_assignments(current_user):
             assignments.sort(key=lambda x: x.due_date)
         else:  # created_at
             assignments.sort(key=lambda x: x.created_at, reverse=True)
-        
-        # Format response
+
+        # ---- Cursor pagination over the fully-sorted list ----
+        limit, cursor = _parse_pagination_params()
+        page, has_more, next_cursor = _slice_by_cursor(assignments, cursor, limit)
+
+        # Format response (current page only)
         assignments_data = []
-        for assignment in assignments:
+        for assignment in page:
             hours_until_due = (assignment.due_date - datetime.utcnow()).total_seconds() / 3600
             
             assignments_data.append({
@@ -493,14 +550,17 @@ def get_my_assignments(current_user):
                 ).count() if assignment.is_shared_for_help else 0
             })
         
-        # Get smart suggestions
-        suggestions = _get_smart_suggestions(assignments, current_user)
+        # Smart suggestions only need to be computed (and shown) on the
+        # first page — they're based on the full active set regardless.
+        suggestions = _get_smart_suggestions(assignments, current_user) if not cursor else []
         
         return jsonify({
             "status": "success",
             "data": {
                 "assignments": assignments_data,
-                "total": len(assignments_data),
+                "total": len(assignments),
+                "next_cursor": next_cursor,
+                "has_more": has_more,
                 "suggestions": suggestions,
                 "stats": {
                     "not_started": len([a for a in assignments if a.status == "not_started"]),
@@ -763,14 +823,18 @@ def assignment_quick_actions(current_user, assignment_id):
 @token_required
 def get_homework_feed(current_user):
     """
-    Get all available homework from connections that need help
-    
+    Get all available homework from connections that need help.
+    Supports cursor-based (infinite scroll) pagination.
+
     This is the "Browse assignments from connections" endpoint
     
     Query params:
     - subject: Filter by subject
     - difficulty: Filter by difficulty
     - sort: urgency, recent, difficulty (default: urgency)
+    - limit: page size, default 15, max 50
+    - cursor: id of the last homework item already loaded by the client
+              (omit / null for the first page)
     """
     try:
         # Get all accepted connections
@@ -795,6 +859,8 @@ def get_homework_feed(current_user):
                 "data": {
                     "homework": [],
                     "total": 0,
+                    "next_cursor": None,
+                    "has_more": False,
                     "message": "Connect with other students to see their homework requests"
                 }
             })
@@ -831,10 +897,14 @@ def get_homework_feed(current_user):
         elif sort_by == "difficulty":
             difficulty_order = {"easy": 1, "medium": 2, "hard": 3}
             homework_items.sort(key=lambda x: difficulty_order.get(x.difficulty, 2))
+
+        # ---- Cursor pagination over the fully-sorted list ----
+        limit, cursor = _parse_pagination_params()
+        page, has_more, next_cursor = _slice_by_cursor(homework_items, cursor, limit)
         
-        # Format response
+        # Format response (current page only)
         homework_data = []
-        for hw in homework_items:
+        for hw in page:
             student = User.query.get(hw.user_id)
             hours_until_due = (hw.due_date - datetime.utcnow()).total_seconds() / 3600
             
@@ -877,14 +947,16 @@ def get_homework_feed(current_user):
                 "created_at": hw.created_at.isoformat()
             })
         
-        # Get subjects for filtering
+        # Get subjects for filtering (from the full matching set, not just this page)
         available_subjects = list(set([hw.subject for hw in homework_items if hw.subject]))
         
         return jsonify({
             "status": "success",
             "data": {
                 "homework": homework_data,
-                "total": len(homework_data),
+                "total": len(homework_items),
+                "next_cursor": next_cursor,
+                "has_more": has_more,
                 "available_subjects": sorted(available_subjects),
                 "filters_applied": {
                     "subject": subject,
