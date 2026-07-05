@@ -17,11 +17,12 @@ Run standalone:
 import random
 import datetime
 import logging
+import time
 from typing import List, Dict, Set, Tuple
 from collections import Counter
 
 from werkzeug.security import generate_password_hash
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError, OperationalError, DBAPIError
 from extensions import db
 from models import User, StudentProfile, OnboardingDetails, AIUsageQuota
 
@@ -34,6 +35,13 @@ class SeedConfig:
     SEED_RANDOM_STATE = 42
     BATCH_SIZE = 200
     DEFAULT_PASSWORD = "password123"
+
+    # Resilience settings for long-running seeds against a remote DB.
+    # Cloud Postgres providers (Supabase/Neon/Render/etc.) frequently drop
+    # connections mid-session — these settings let a batch recover instead
+    # of aborting the whole run.
+    MAX_BATCH_RETRIES = 5
+    RETRY_BACKOFF_SECONDS = 2  # doubles each retry: 2s, 4s, 8s, 16s, 32s
 
     # Account age spread — up to ~2 years so the community looks established,
     # not freshly created.
@@ -397,7 +405,7 @@ def generate_study_schedule() -> Dict[str, List[str]]:
 
 
 def generate_activity_dates(joined_at: datetime.datetime) -> Tuple[datetime.datetime, int]:
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.timezone.utc)
     days_since_join = (now - joined_at).days
 
     if random.random() < config.ACTIVE_USER_PERCENTAGE:
@@ -435,7 +443,7 @@ def create_random_student(
     bio = generate_bio(department, class_level, subjects, interests)
     reputation = generate_reputation()
 
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.timezone.utc)
     days_ago = random.randint(config.MIN_DAYS_AGO, config.MAX_DAYS_AGO)
     joined_at = now - datetime.timedelta(days=days_ago)
     last_active, login_streak = generate_activity_dates(joined_at)
@@ -551,28 +559,79 @@ def seed_students() -> bool:
     origin_counter: Counter = Counter()
     users_created = 0
 
+    # Objects for the batch currently being built, kept outside the DB
+    # session buffers so a dropped connection can be recovered by simply
+    # re-adding + re-committing this same batch, instead of losing progress
+    # or aborting the whole run.
+    pending: List[tuple] = []
+
+    def flush_pending(batch_num_created: int) -> bool:
+        """Commit whatever is pending, retrying with backoff + reconnect
+        if the connection was dropped mid-batch (e.g. 'server closed the
+        connection unexpectedly'). Returns True on success."""
+        for attempt in range(1, config.MAX_BATCH_RETRIES + 1):
+            try:
+                for user, profile, onboarding, quota in pending:
+                    db.session.add(user)
+                    db.session.add(profile)
+                    db.session.add(onboarding)
+                    db.session.add(quota)
+                db.session.commit()
+                return True
+            except (OperationalError, DBAPIError) as e:
+                logger.error(
+                    f"DB connection error on batch ending at {batch_num_created} "
+                    f"(attempt {attempt}/{config.MAX_BATCH_RETRIES}): {e}"
+                )
+                db.session.rollback()
+                # Drop the whole pool so every stale/half-dead connection is
+                # discarded; the next commit will open a fresh one.
+                db.session.remove()
+                db.engine.dispose()
+                if attempt < config.MAX_BATCH_RETRIES:
+                    wait = config.RETRY_BACKOFF_SECONDS * (2 ** (attempt - 1))
+                    print(f"   ⚠️  Connection dropped, retrying in {wait}s "
+                          f"(attempt {attempt}/{config.MAX_BATCH_RETRIES})...")
+                    time.sleep(wait)
+            except SQLAlchemyError as e:
+                logger.error(f"Non-connection DB error, aborting batch: {e}")
+                db.session.rollback()
+                return False
+        logger.error(f"Batch ending at {batch_num_created} failed after "
+                      f"{config.MAX_BATCH_RETRIES} retries — giving up.")
+        return False
+
     try:
         for i in range(config.NUM_STUDENTS):
             try:
                 user, profile, onboarding, quota, origin = create_random_student(
                     used_usernames, used_emails
                 )
-                db.session.add(user)
-                db.session.add(profile)
-                db.session.add(onboarding)
-                db.session.add(quota)
+                pending.append((user, profile, onboarding, quota))
                 origin_counter[origin] += 1
-                users_created += 1
 
-                if users_created % config.BATCH_SIZE == 0:
-                    db.session.commit()
+                if len(pending) >= config.BATCH_SIZE:
+                    if not flush_pending(users_created + len(pending)):
+                        print(f"❌ Could not save batch after "
+                              f"{users_created} students created. Stopping.")
+                        return False
+                    users_created += len(pending)
+                    pending = []
+                    # Keep the session's identity map from growing unbounded
+                    # over 3000 rows, which slows things down over the run.
+                    db.session.expire_all()
                     print(f"   ✓ Created {users_created}/{config.NUM_STUDENTS} students...")
             except Exception as e:
-                logger.error(f"Error creating student {i}: {e}")
-                db.session.rollback()
+                logger.error(f"Error building student {i}: {e}")
                 continue
 
-        db.session.commit()
+        if pending:
+            if not flush_pending(users_created + len(pending)):
+                print(f"❌ Could not save final batch after "
+                      f"{users_created} students created.")
+                return False
+            users_created += len(pending)
+
         print(f"\n✅ Created {users_created} students successfully!")
         print_summary_statistics(origin_counter)
         return True

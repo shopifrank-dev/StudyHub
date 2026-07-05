@@ -77,10 +77,11 @@ Run standalone:
 import random
 import datetime
 import logging
+import time
 from typing import List, Dict, Set, Tuple, Optional
 from collections import Counter, defaultdict
 
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError, OperationalError, DBAPIError
 from extensions import db
 from models import (
     User, StudentProfile, Post, PostView, Comment, CommentLike,
@@ -98,6 +99,11 @@ class SeedConfig:
     SEED_RANDOM_STATE = 42
     POST_BATCH_SIZE = 250              # posts flushed/committed per micro-batch
     BULK_BATCH_SIZE = 5_000            # size for bulk_save_objects flushes
+
+    # Resilience: retry a commit on a dropped/stale DB connection instead
+    # of aborting the whole (multi-phase, long-running) run.
+    MAX_BATCH_RETRIES = 5
+    RETRY_BACKOFF_SECONDS = 2
 
     # ---- Posting-activity tiers: (name, weight, (min_posts, max_posts)) ----
     POST_COUNT_TIERS = [
@@ -709,7 +715,7 @@ def random_past_datetime(max_days_ago: int) -> datetime.datetime:
     days_ago = int(r * max_days_ago)
     seconds_offset = random.randint(0, 86399)
     return (
-        datetime.datetime.utcnow()
+        datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
         - datetime.timedelta(days=days_ago)
         + datetime.timedelta(seconds=seconds_offset)
     )
@@ -719,7 +725,7 @@ def random_datetime_after(start: datetime.datetime, max_hours_later: int) -> dat
     hours_later = random.randint(0, max(1, max_hours_later))
     minutes_jitter = random.randint(0, 59)
     candidate = start + datetime.timedelta(hours=hours_later, minutes=minutes_jitter)
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
     return min(candidate, now)
 
 
@@ -790,6 +796,44 @@ def pick_popularity_tier(author_tier: str) -> Tuple[str, Tuple[int, int], Tuple[
 # ============================================================================
 # DATABASE PREREQUISITES
 # ============================================================================
+
+
+def commit_with_retry(label: str = "batch") -> None:
+    """Commit the current session, retrying with backoff + a fresh
+    connection pool if the connection was dropped mid-commit (e.g.
+    'server closed the connection unexpectedly'). This script runs
+    several long, multi-phase loops, so a transient drop should be
+    recovered from rather than crashing the whole run.
+
+    Raises RuntimeError if the commit still fails after all retries —
+    same failure mode as a plain db.session.commit(), just retried first.
+    """
+    for attempt in range(1, config.MAX_BATCH_RETRIES + 1):
+        try:
+            db.session.commit()
+            return
+        except (OperationalError, DBAPIError) as e:
+            logger.error(
+                f"DB connection error committing {label} "
+                f"(attempt {attempt}/{config.MAX_BATCH_RETRIES}): {e}"
+            )
+            db.session.rollback()
+            db.session.remove()
+            db.engine.dispose()
+            if attempt < config.MAX_BATCH_RETRIES:
+                wait = config.RETRY_BACKOFF_SECONDS * (2 ** (attempt - 1))
+                print(f"   ⚠️  Connection dropped, retrying in {wait}s "
+                      f"(attempt {attempt}/{config.MAX_BATCH_RETRIES})...")
+                time.sleep(wait)
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            logger.error(f"Non-connection DB error committing {label}: {e}")
+            raise
+    raise RuntimeError(
+        f"{label} commit failed after {config.MAX_BATCH_RETRIES} retries — giving up."
+    )
+
+
 
 def verify_database_connection() -> bool:
     return True
@@ -934,7 +978,7 @@ def maybe_create_mention(mentioned_in_type: str, mentioned_in_id: int, author_id
         mentioned_user_id=mentioned_user.id,
         mentioned_by_user_id=author_id,
         is_read=random.choice([True, False]),
-        mentioned_at=datetime.datetime.utcnow(),
+        mentioned_at=datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None),
     )
 
 
@@ -1046,7 +1090,7 @@ def seed_posts() -> bool:
         if mentions_batch:
             db.session.bulk_save_objects(mentions_batch)
 
-        db.session.commit()
+        commit_with_retry("posts batch")
         batch_buffer = []
         author_for_buffer = []
         tier_for_buffer = []
@@ -1107,7 +1151,7 @@ def seed_posts() -> bool:
                 follows_buffer.append(PostFollow(
                     post_id=post.id,
                     student_id=viewer.id,
-                    followed_at=datetime.datetime.utcnow(),
+                    followed_at=datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None),
                     notify_on_comment=random.choice([True, True, False]),
                     notify_on_solution=random.choice([True, True, False]),
                 ))
@@ -1126,7 +1170,7 @@ def seed_posts() -> bool:
         db.session.bulk_save_objects(views_buffer)
     if follows_buffer:
         db.session.bulk_save_objects(follows_buffer)
-    db.session.commit()
+    commit_with_retry("views/follows phase")
     print(f"✅ Created {views_created} post views and {follows_created} follows")
     logger.info(f"Views phase complete: {views_created} views, {follows_created} follows")
 
@@ -1172,7 +1216,7 @@ def seed_posts() -> bool:
 
     if reactions_buffer:
         db.session.bulk_save_objects(reactions_buffer)
-    db.session.commit()
+    commit_with_retry("reactions phase")
     print(f"✅ Created {reactions_created} post reactions")
     logger.info(f"Reactions phase complete: {reactions_created} reactions")
 
@@ -1302,7 +1346,7 @@ def seed_posts() -> bool:
             posts_processed += 1
 
             if posts_processed % config.POST_BATCH_SIZE == 0:
-                db.session.commit()
+                commit_with_retry("comments batch")
                 print(f"   ✓ Processed comments for {posts_processed}/{len(created_posts)} posts "
                       f"({comments_created} comments, {replies_created} replies so far)...")
 
@@ -1312,7 +1356,7 @@ def seed_posts() -> bool:
             continue
 
     flush_bulk_buffers(force=True)
-    db.session.commit()
+    commit_with_retry("comments final flush")
     print(f"✅ Created {comments_created} top-level comments + {replies_created} replies")
     print(f"✅ Created {comment_likes_created} comment likes, {helpful_marks_created} helpful marks")
     logger.info(
@@ -1322,9 +1366,9 @@ def seed_posts() -> bool:
 
     # ---- FINAL COMMIT -----------------------------------------------------
     try:
-        db.session.commit()
+        commit_with_retry("final commit")
         logger.info("Final commit successful")
-    except SQLAlchemyError as e:
+    except (SQLAlchemyError, RuntimeError) as e:
         db.session.rollback()
         logger.error(f"Final commit failed: {e}")
         print(f"❌ Final commit failed: {e}")

@@ -34,10 +34,11 @@ Tune the numbers in SeedConfig to hit whatever scale you need:
 import random
 import datetime
 import logging
+import time
 from typing import List, Dict, Set, Tuple, Optional
 from collections import defaultdict, Counter
 
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError, OperationalError, DBAPIError
 from extensions import db
 from models import (
     User, StudentProfile, Connection,
@@ -53,6 +54,11 @@ from models import (
 class SeedConfig:
     SEED_RANDOM_STATE = 7
     BATCH_SIZE = 300
+
+    # Resilience: retry a commit on a dropped/stale DB connection instead
+    # of aborting a run that can take a while at ~125k messages.
+    MAX_BATCH_RETRIES = 5
+    RETRY_BACKOFF_SECONDS = 2
 
     # ---- Scale knobs -------------------------------------------------------
     NUM_THREADS = 1500                 # spec: 1,200-1,800
@@ -354,11 +360,11 @@ def random_past_datetime(max_days: int = config.MAX_DAYS_AGO,
     days    = random.randint(min_days, max_days)
     hours   = random.randint(0, 23)
     minutes = random.randint(0, 59)
-    return datetime.datetime.utcnow() - datetime.timedelta(days=days, hours=hours, minutes=minutes)
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) - datetime.timedelta(days=days, hours=hours, minutes=minutes)
 
 
 def pick_message_status(sent_at: datetime.datetime) -> str:
-    age_hours = (datetime.datetime.utcnow() - sent_at).total_seconds() / 3600
+    age_hours = (datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) - sent_at).total_seconds() / 3600
     weights = (config.STATUS_WEIGHTS_RECENT if age_hours < config.RECENT_CUTOFF_HOURS
                else config.STATUS_WEIGHTS_OLD)
     return random.choices(["sent", "delivered", "read"], weights=weights)[0]
@@ -606,7 +612,7 @@ def add_members(thread: Thread, creator_id: int, member_ids: List[int],
     db.session.add(ThreadMember(
         thread_id=thread.id, student_id=creator_id, role="creator",
         joined_at=thread.created_at,
-        last_read_at=datetime.datetime.utcnow(),
+        last_read_at=datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None),
         messages_sent=0,
     ))
 
@@ -616,7 +622,7 @@ def add_members(thread: Thread, creator_id: int, member_ids: List[int],
         db.session.add(ThreadMember(
             thread_id=thread.id, student_id=uid, role=role,
             joined_at=thread.created_at + offset,
-            last_read_at=datetime.datetime.utcnow() - datetime.timedelta(hours=random.randint(0, 72)),
+            last_read_at=datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) - datetime.timedelta(hours=random.randint(0, 72)),
             messages_sent=0,
         ))
 
@@ -996,6 +1002,41 @@ def seed_invites(
 # CLEAR EXISTING DATA
 # ============================================================================
 
+def commit_with_retry(label: str = "batch") -> None:
+    """Commit the current session, retrying with backoff + a fresh
+    connection pool if the connection was dropped mid-commit (e.g.
+    'server closed the connection unexpectedly'). At ~125k messages
+    this run can take a while, so a transient drop should be
+    recovered from rather than crashing the whole run.
+
+    Raises RuntimeError if the commit still fails after all retries.
+    """
+    for attempt in range(1, config.MAX_BATCH_RETRIES + 1):
+        try:
+            db.session.commit()
+            return
+        except (OperationalError, DBAPIError) as e:
+            logger.error(
+                f"DB connection error committing {label} "
+                f"(attempt {attempt}/{config.MAX_BATCH_RETRIES}): {e}"
+            )
+            db.session.rollback()
+            db.session.remove()
+            db.engine.dispose()
+            if attempt < config.MAX_BATCH_RETRIES:
+                wait = config.RETRY_BACKOFF_SECONDS * (2 ** (attempt - 1))
+                print(f"   ⚠️  Connection dropped, retrying in {wait}s "
+                      f"(attempt {attempt}/{config.MAX_BATCH_RETRIES})...")
+                time.sleep(wait)
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            logger.error(f"Non-connection DB error committing {label}: {e}")
+            raise
+    raise RuntimeError(
+        f"{label} commit failed after {config.MAX_BATCH_RETRIES} retries — giving up."
+    )
+
+
 def clear_existing_thread_data() -> bool:
     try:
         print("🗑️   Clearing existing thread-related data...")
@@ -1068,21 +1109,21 @@ def seed_threads() -> bool:
             total_messages += msg_count
 
             if (i + 1) % config.BATCH_SIZE == 0:
-                db.session.commit()
+                commit_with_retry(f"threads batch ending at {i + 1}")
                 print(f"   ✓ {i + 1}/{config.NUM_THREADS} threads committed "
                       f"(~{total_messages} messages so far)...")
 
-        db.session.commit()
+        commit_with_retry("final threads commit")
         print(f"✅  {len(all_threads)} threads created, ~{total_messages} messages seeded.")
 
         print(f"\n📥  Seeding {config.NUM_JOIN_REQUESTS} join requests...")
         join_reqs = seed_join_requests(all_threads, member_map, user_meta, users, config.NUM_JOIN_REQUESTS)
-        db.session.commit()
+        commit_with_retry("join requests")
         print(f"   ✓ {join_reqs} join requests created.")
 
         print(f"\n📨  Seeding {config.NUM_INVITES} invites...")
         invites = seed_invites(all_threads, member_map, friend_adj, users, config.NUM_INVITES)
-        db.session.commit()
+        commit_with_retry("invites")
         print(f"   ✓ {invites} invites created.")
 
         print_summary(all_threads, participation_tiers)

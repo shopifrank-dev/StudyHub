@@ -57,10 +57,11 @@ modest ones, and connections cluster heavily around shared context
 import random
 import datetime
 import logging
+import time
 from typing import List, Dict, Tuple, Optional
 from collections import Counter, defaultdict
 
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError, OperationalError, DBAPIError
 from extensions import db
 from models import User, Connection, StudentProfile
 
@@ -73,6 +74,11 @@ class SeedConfig:
 
     SEED_RANDOM_STATE = 42
     BATCH_SIZE = 500
+
+    # Resilience: retry a batch commit on a dropped/stale DB connection
+    # instead of aborting the whole run.
+    MAX_BATCH_RETRIES = 5
+    RETRY_BACKOFF_SECONDS = 2
 
     # ---- Sociability tiers: (name, selection_weight, (min_degree, max_degree)) ----
     # Weights are relative, not percentages — they just need to sum sensibly.
@@ -301,7 +307,7 @@ def build_indices(rows) -> Tuple[Dict, Dict, Dict, List[int], Dict[int, dict]]:
     for user_id, department, class_name, joined_at in rows:
         dept = department or "Unspecified"
         level = class_name or "Unspecified"
-        joined = joined_at or datetime.datetime.utcnow()
+        joined = joined_at or datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
         cohort = (joined.year, joined.month)
 
         dept_index[dept].append(user_id)
@@ -567,7 +573,36 @@ def seed_connections() -> bool:
     print(f"\n💾 Materializing {len(edges)} connections into the database...")
     connections_created = 0
     connections_failed = 0
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+
+    pending: List[Connection] = []
+
+    def flush_pending() -> bool:
+        for attempt in range(1, config.MAX_BATCH_RETRIES + 1):
+            try:
+                for conn_obj in pending:
+                    db.session.add(conn_obj)
+                db.session.commit()
+                return True
+            except (OperationalError, DBAPIError) as e:
+                logger.error(
+                    f"DB connection error committing batch "
+                    f"(attempt {attempt}/{config.MAX_BATCH_RETRIES}): {e}"
+                )
+                db.session.rollback()
+                db.session.remove()
+                db.engine.dispose()
+                if attempt < config.MAX_BATCH_RETRIES:
+                    wait = config.RETRY_BACKOFF_SECONDS * (2 ** (attempt - 1))
+                    print(f"   ⚠️  Connection dropped, retrying in {wait}s "
+                          f"(attempt {attempt}/{config.MAX_BATCH_RETRIES})...")
+                    time.sleep(wait)
+            except SQLAlchemyError as e:
+                logger.error(f"Non-connection DB error, aborting batch: {e}")
+                db.session.rollback()
+                return False
+        logger.error(f"Batch failed after {config.MAX_BATCH_RETRIES} retries — giving up.")
+        return False
 
     try:
         for a, b in edges:
@@ -589,20 +624,30 @@ def seed_connections() -> bool:
                 connection = create_connection_record(
                     requester_id, receiver_id, status, requested_at
                 )
-                db.session.add(connection)
-                connections_created += 1
+                pending.append(connection)
 
-                if connections_created % config.BATCH_SIZE == 0:
-                    db.session.commit()
+                if len(pending) >= config.BATCH_SIZE:
+                    if not flush_pending():
+                        print(f"❌ Could not save batch after "
+                              f"{connections_created} connections created. Stopping.")
+                        return False
+                    connections_created += len(pending)
+                    pending = []
+                    db.session.expire_all()
                     print(f"   ✓ {connections_created}/{len(edges)} connections committed...")
 
             except Exception as e:
                 logger.error(f"Error creating connection {a}-{b}: {e}")
-                db.session.rollback()
                 connections_failed += 1
                 continue
 
-        db.session.commit()
+        if pending:
+            if not flush_pending():
+                print(f"❌ Could not save final batch after "
+                      f"{connections_created} connections created.")
+                return False
+            connections_created += len(pending)
+
         print(f"\n✅ Created {connections_created} connections successfully!")
         if connections_failed:
             print(f"⚠️  {connections_failed} connections failed to create")

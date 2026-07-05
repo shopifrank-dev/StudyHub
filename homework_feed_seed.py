@@ -47,10 +47,11 @@ import random
 import logging
 import argparse
 import datetime
+import time
 from typing import List, Dict, Set, Tuple, Optional
 from collections import Counter, defaultdict
 
-from sqlalchemy.exc import SQLAlchemyError, IntegrityError
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError, OperationalError, DBAPIError
 
 try:
     from app import app
@@ -71,6 +72,11 @@ except ImportError as exc:
 class SeedConfig:
     RANDOM_SEED = 2024
     BATCH_SIZE = 500
+
+    # Resilience: retry a batch commit on a dropped/stale DB connection
+    # instead of losing/aborting the whole run.
+    MAX_BATCH_RETRIES = 5
+    RETRY_BACKOFF_SECONDS = 2
 
     # ── Sociability tiers for HOMEWORK usage (not the same as the social
     #    graph tiers in connection_seed-1.py — someone can have 200 friends
@@ -343,7 +349,7 @@ REACTION_WEIGHTS = [0.30, 0.35, 0.15, 0.20]
 # ============================================================================
 
 def now() -> datetime.datetime:
-    return datetime.datetime.utcnow()
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
 
 def past(days: int = 0, hours: int = 0) -> datetime.datetime:
@@ -584,26 +590,51 @@ def make_activity(user_id: int, activity_type: str, data: dict) -> ActivityFeed:
 # BATCH COMMIT HELPER
 # ============================================================================
 
+def _commit_with_retry(label: str, item_count: int) -> bool:
+    """Commit the current session, retrying with backoff + a fresh
+    connection pool if the connection was dropped mid-batch."""
+    for attempt in range(1, config.MAX_BATCH_RETRIES + 1):
+        try:
+            db.session.commit()
+            return True
+        except (OperationalError, DBAPIError) as e:
+            logger.error(
+                f"DB connection error committing {label} batch "
+                f"(attempt {attempt}/{config.MAX_BATCH_RETRIES}): {e}"
+            )
+            db.session.rollback()
+            db.session.remove()
+            db.engine.dispose()
+            if attempt < config.MAX_BATCH_RETRIES:
+                wait = config.RETRY_BACKOFF_SECONDS * (2 ** (attempt - 1))
+                print(f"   ⚠️  Connection dropped, retrying in {wait}s "
+                      f"(attempt {attempt}/{config.MAX_BATCH_RETRIES})...")
+                time.sleep(wait)
+        except (SQLAlchemyError, IntegrityError) as e:
+            db.session.rollback()
+            logger.error(f"Batch commit error ({label}): {e}")
+            return False
+    logger.error(f"{label} batch failed after {config.MAX_BATCH_RETRIES} retries — giving up.")
+    return False
+
+
 def batch_add_commit(items: List, label: str) -> Tuple[int, int]:
     ok, failed = 0, 0
+    pending_since_commit = 0
     for i, item in enumerate(items, 1):
         db.session.add(item)
-        ok += 1
+        pending_since_commit += 1
         if i % config.BATCH_SIZE == 0:
-            try:
-                db.session.commit()
-            except (SQLAlchemyError, IntegrityError) as e:
-                db.session.rollback()
-                logger.error(f"Batch commit error ({label} #{i}): {e}")
-                failed += config.BATCH_SIZE
-                ok -= config.BATCH_SIZE
-    try:
-        db.session.commit()
-    except (SQLAlchemyError, IntegrityError) as e:
-        db.session.rollback()
-        logger.error(f"Final commit error ({label}): {e}")
-        failed += ok
-        ok = 0
+            if _commit_with_retry(label, pending_since_commit):
+                ok += pending_since_commit
+            else:
+                failed += pending_since_commit
+            pending_since_commit = 0
+    if pending_since_commit:
+        if _commit_with_retry(label, pending_since_commit):
+            ok += pending_since_commit
+        else:
+            failed += pending_since_commit
     return ok, failed
 
 # ============================================================================
