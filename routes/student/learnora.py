@@ -1740,6 +1740,7 @@ def chat(current_user):
                 'can_continue': not response_complete and not error_occurred,
                 'provider': provider['name']
             })}\n\n"
+       
 
         return Response(
             stream_with_context(generate()),
