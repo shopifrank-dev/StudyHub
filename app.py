@@ -13,6 +13,7 @@ import os
 from routes.student.helpers import (
     token_required, success_response, error_response
 )
+from sqlalchemy import text 
 
 from waitlist import waitlist_bp
 import logging
@@ -245,7 +246,7 @@ def create_app(config_class=Config):
         """Health check endpoint for monitoring"""
         try:
             # Check database connection
-            db.session.execute('SELECT 1')
+            db.session.execute(text('SELECT 1'))
             
             # Check email configuration
             email_status = bool(
