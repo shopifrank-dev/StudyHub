@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from flask import Flask, render_template, request, jsonify
 from flask_migrate import Migrate
 from werkzeug.middleware.proxy_fix import ProxyFix
+from sqlalchemy import text
 from services.websocket_messages import init_message_websocket
 from services.websocket_threads import thread_ws_manager
 from extensions import db, mail
@@ -259,7 +260,7 @@ def create_app(config_class=Config):
         """Health check endpoint for monitoring"""
         try:
             # Check database connection
-            db.session.execute('SELECT 1')
+            db.session.execute(text('SELECT 1'))
             
             # Check email configuration
             email_status = bool(
