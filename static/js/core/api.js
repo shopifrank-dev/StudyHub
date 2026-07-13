@@ -82,7 +82,9 @@ class APIClient {
       });
 
       if (!response.ok) {
-        throw new Error('Token refresh failed');
+        const body = await response.text().catch(() => '');
+        console.error(`❌ Refresh-token request failed with status ${response.status}:`, body.slice(0, 300));
+        throw new Error(`Token refresh failed (${response.status})`);
       }
 
       const data = await response.json();
@@ -152,7 +154,8 @@ class APIClient {
     }
     
     let token = this.getToken();
-    
+    console.log(token ? `🔑 Token found (first 12 chars): ${token.slice(0, 12)}...` : '🚫 No access_token cookie found by getToken()');
+
     // Check if token needs refresh
     if (this.isTokenExpired(token)) {
       console.log('⚠️ Token expired or expiring soon, refreshing...');
@@ -200,22 +203,45 @@ class APIClient {
    */
   async handleResponse(response) {
     const contentType = response.headers.get('content-type');
-    
+
+    // ✅ DEBUG: log every response's status/URL so failures are visible in console
+    console.log(`📡 API response: ${response.status} ${response.url}`);
+
     if (contentType && contentType.includes('application/json')) {
       const data = await response.json();
-      
+
       if (!response.ok) {
-        throw new Error(data.message || 'Request failed');
+        console.error(`❌ API error ${response.status} on ${response.url}:`, data);
+        const err = new Error(data.message || `Request failed (${response.status})`);
+        err.status = response.status;
+        err.data = data;
+        throw err;
       }
-      
+
       return data;
     }
-    
+
     if (!response.ok) {
-      throw new Error('Request failed');
+      // ✅ DEBUG: capture non-JSON error bodies too (e.g. HTML error pages, proxy errors)
+      const text = await response.text().catch(() => '');
+      console.error(`❌ API error ${response.status} on ${response.url} (non-JSON response):`, text.slice(0, 300));
+      const err = new Error(`Request failed (${response.status})`);
+      err.status = response.status;
+      throw err;
     }
-    
+
     return response;
+  }
+
+  /**
+   * Show a toast for a failed request, unless the caller opts out.
+   */
+  notifyRequestError(error, endpoint) {
+    const message = error?.message || 'Something went wrong. Please try again.';
+    console.error(`❌ Request to ${endpoint} failed:`, error);
+    if (typeof showToast === 'function') {
+      showToast(message, 'error');
+    }
   }
 
   /**
@@ -239,7 +265,7 @@ class APIClient {
       
       return await this.handleResponse(response);
     } catch (error) {
-      console.error('GET request failed:', error);
+      this.notifyRequestError(error, endpoint);
       throw error;
     }
   }
@@ -276,7 +302,7 @@ class APIClient {
       const response = await fetch(url, options);
       return await this.handleResponse(response);
     } catch (error) {
-      console.error('POST request failed:', error);
+      this.notifyRequestError(error, endpoint);
       throw error;
     }
   }
@@ -309,7 +335,7 @@ class APIClient {
       const response = await fetch(url, options);
       return await this.handleResponse(response);
     } catch (error) {
-      console.error('PUT request failed:', error);
+      this.notifyRequestError(error, endpoint);
       throw error;
     }
   }
@@ -332,7 +358,7 @@ class APIClient {
       
       return await this.handleResponse(response);
     } catch (error) {
-      console.error('PATCH request failed:', error);
+      this.notifyRequestError(error, endpoint);
       throw error;
     }
   }
@@ -354,7 +380,7 @@ class APIClient {
       
       return await this.handleResponse(response);
     } catch (error) {
-      console.error('DELETE request failed:', error);
+      this.notifyRequestError(error, endpoint);
       throw error;
     }
   }
