@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 
 from flask import Flask, render_template, request, jsonify
 from flask_migrate import Migrate
+from werkzeug.middleware.proxy_fix import ProxyFix
 from services.websocket_messages import init_message_websocket
 from services.websocket_threads import thread_ws_manager
 from extensions import db, mail
@@ -13,7 +14,6 @@ import os
 from routes.student.helpers import (
     token_required, success_response, error_response
 )
-from sqlalchemy import text 
 
 from waitlist import waitlist_bp
 import logging
@@ -118,6 +118,19 @@ class Config:
 def create_app(config_class=Config):
     """Create and configure the Flask application"""
     app = Flask(__name__)
+
+    # ========================================================================
+    # Trust Railway's (and any other) reverse proxy
+    # ========================================================================
+    # Railway/Render/Heroku terminate HTTPS at their edge proxy and forward
+    # plain HTTP to this app internally. Without this, Flask thinks every
+    # request is HTTP, which makes url_for(..., _external=True) generate
+    # http:// URLs even on an https:// page -> browsers block them as
+    # "mixed content". ProxyFix reads the X-Forwarded-Proto/Host/For headers
+    # the proxy sets, so Flask sees the real scheme/host.
+    # x_proto=1 / x_host=1 / x_for=1 = trust these headers from 1 proxy hop.
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+
     app.config.from_object(config_class)
     
     # Initialize extensions
@@ -246,7 +259,7 @@ def create_app(config_class=Config):
         """Health check endpoint for monitoring"""
         try:
             # Check database connection
-            db.session.execute(text('SELECT 1'))
+            db.session.execute('SELECT 1')
             
             # Check email configuration
             email_status = bool(
